@@ -1,0 +1,987 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ANT IPO · Piloto Automático Big Tech & Quantfury</title>
+  <style>
+    :root {
+      --bg: #070b12;
+      --card: #0e1522;
+      --sub: #141e30;
+      --border: #202d44;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --green: #10b981;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --blue: #38bdf8;
+      --purple: #a78bfa;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      font-size: 13px;
+      line-height: 1.42;
+    }
+    .mono { font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Header */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background: rgba(7, 11, 18, 0.95);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-tag {
+      background: linear-gradient(135deg, #0ea5e9, #10b981);
+      color: #fff;
+      font-weight: 800;
+      padding: 6px 10px;
+      border-radius: 8px;
+      letter-spacing: 0.5px;
+    }
+    .top-right { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid var(--border);
+      background: var(--sub);
+    }
+    .pill-green { color: var(--green); border-color: rgba(16, 185, 129, 0.45); background: rgba(16, 185, 129, 0.12); }
+    .pill-red { color: var(--red); border-color: rgba(239, 68, 68, 0.45); background: rgba(239, 68, 68, 0.12); }
+    .pill-amber { color: var(--amber); border-color: rgba(245, 158, 11, 0.45); background: rgba(245, 158, 11, 0.12); }
+    .pill-blue { color: var(--blue); border-color: rgba(56, 189, 248, 0.45); background: rgba(56, 189, 248, 0.12); }
+    .pill-purple { color: var(--purple); border-color: rgba(167, 139, 250, 0.45); background: rgba(167, 139, 250, 0.12); }
+
+    .capital-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--sub);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 4px 10px;
+    }
+    input, button {
+      font-family: inherit;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 9px;
+      font-size: 12px;
+    }
+    button { cursor: pointer; font-weight: 600; background: var(--sub); transition: border-color 0.15s; }
+    button:hover { border-color: var(--blue); }
+    button.active-chip { background: #0284c7; border-color: #38bdf8; color: #fff; }
+
+    /* Container */
+    main {
+      max-width: 1580px;
+      margin: 0 auto;
+      padding: 16px 20px 44px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    /* Bloque 1: Hero Order Banner */
+    .order-hero {
+      border-radius: 12px;
+      padding: 16px 18px;
+      border: 2px solid var(--border);
+      background: var(--sub);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .order-hero.GREEN { border-color: var(--green); background: linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(14, 21, 34, 0.96)); }
+    .order-hero.RED { border-color: var(--red); background: linear-gradient(135deg, rgba(239, 68, 68, 0.16), rgba(14, 21, 34, 0.96)); }
+    .order-hero.AMBER { border-color: var(--amber); background: linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(14, 21, 34, 0.96)); }
+    .order-hero.BLUE { border-color: var(--blue); background: linear-gradient(135deg, rgba(56, 189, 248, 0.16), rgba(14, 21, 34, 0.96)); }
+
+    .hero-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
+    .signal-main { font-size: 26px; font-weight: 900; }
+    .GREEN .signal-main { color: var(--green); }
+    .RED .signal-main { color: var(--red); }
+    .AMBER .signal-main { color: var(--amber); }
+    .BLUE .signal-main { color: var(--blue); }
+
+    .grid-5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    @media (max-width: 1120px) {
+      .grid-5, .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-3, .grid-2 { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      .grid-5, .grid-4 { grid-template-columns: 1fr; }
+    }
+
+    .kpi-box {
+      background: rgba(7, 11, 18, 0.72);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .kpi-label { font-size: 11px; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+    .kpi-val { font-size: 20px; font-weight: 800; margin-top: 3px; }
+    .kpi-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    .reason-box {
+      background: rgba(7, 11, 18, 0.65);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+    }
+    .reason-headline { font-size: 14px; font-weight: 700; margin-bottom: 5px; }
+    .reason-list { margin-left: 18px; color: #cbd5e1; margin-bottom: 6px; }
+    .close-rule { padding-top: 6px; border-top: 1px dashed var(--border); font-size: 12px; color: var(--blue); font-weight: 600; }
+
+    /* Top Opportunities & Pair Trade */
+    .op-card {
+      background: var(--sub);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      cursor: pointer;
+      transition: transform 0.12s, border-color 0.12s;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .op-card:hover { border-color: var(--blue); transform: translateY(-1px); }
+    .op-card.GREEN { border-left: 4px solid var(--green); }
+    .op-card.RED { border-left: 4px solid var(--red); }
+
+    .pair-banner {
+      background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(239, 68, 68, 0.12));
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Traffic Lights */
+    .light-card {
+      background: var(--sub);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .light-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+    .dot-GREEN { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot-RED { background: var(--red); box-shadow: 0 0 8px var(--red); }
+    .dot-AMBER { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
+
+    /* Chart */
+    .ticker-bar { display: flex; flex-wrap: wrap; gap: 6px; }
+    .ticker-chip { padding: 4px 8px; font-size: 11px; border-radius: 6px; }
+    .chart-box {
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      height: 260px;
+      width: 100%;
+    }
+    #liveChart { width: 100%; height: 100%; display: block; }
+    .selected-strip {
+      background: var(--sub);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+    }
+
+    /* Sectors */
+    .sector-card {
+      background: var(--sub);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      overflow-x: auto;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 6px 6px; border-bottom: 1px solid rgba(32, 45, 68, 0.65); font-size: 12px; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    td.num, th.num { text-align: right; white-space: nowrap; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover { background: rgba(56, 189, 248, 0.08); }
+    .pos { color: var(--green); font-weight: 700; }
+    .neg { color: var(--red); font-weight: 700; }
+    .sig-tag {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 800;
+      display: inline-block;
+      white-space: nowrap;
+    }
+    .sig-GREEN { background: rgba(16, 185, 129, 0.18); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.4); }
+    .sig-RED { background: rgba(239, 68, 68, 0.18); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.4); }
+    .sig-AMBER { background: rgba(245, 158, 11, 0.14); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.35); }
+
+    .feed-list { max-height: 230px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .feed-item {
+      background: var(--sub);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--blue);
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+    details summary { cursor: pointer; font-weight: 700; color: var(--blue); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-tag">ANT + TECH</div>
+      <div>
+        <div style="font-weight:800; font-size:15px;">Piloto Automático OPI Anthropic & Acciones Tech Impactadas</div>
+        <div style="font-size:12px; color:var(--muted);">
+          España: <span id="clockCet" class="mono">--:--:--</span> · Wall Street: <span id="clockEt" class="mono">--:--:--</span> ·
+          <span id="phaseLabel" style="color:var(--blue); font-weight:600;">Conectando...</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="top-right">
+      <span id="liveFeedsPill" class="pill pill-blue">Conectando feeds...</span>
+      <div class="capital-box">
+        <span style="font-size:12px; color:var(--muted);">Mi Capital Quantfury ($):</span>
+        <input id="capitalInput" type="number" min="100" step="500" value="10000" style="width:90px;" onchange="updateCapital()" />
+      </div>
+      <button id="voiceBtn" onclick="toggleVoice()">Voz / Sonido: ON</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- BLOQUE 1: ORDEN PRINCIPAL DE ANT -->
+    <section class="card">
+      <div class="section-title">
+        <span>1. Orden Principal de la OPI de Anthropic (ANT) para Quantfury</span>
+        <span id="antLiveBadge" class="pill pill-amber">ANT: Pre-Estreno</span>
+      </div>
+
+      <div id="orderHero" class="order-hero AMBER">
+        <div class="hero-top">
+          <div>
+            <div style="font-size:11px; text-transform:uppercase; color:var(--muted); font-weight:700;">Señal Principal Ahora</div>
+            <div class="signal-main" id="signalText">CARGANDO SEÑAL...</div>
+          </div>
+          <div id="wsBadge" class="pill pill-amber">Sincronizando...</div>
+        </div>
+
+        <div class="grid-5">
+          <div class="kpi-box">
+            <div class="kpi-label">Ticker en Quantfury</div>
+            <div class="kpi-val mono" id="targetTicker">--</div>
+            <div class="kpi-sub" id="targetType">--</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-label">Precio en Vivo</div>
+            <div class="kpi-val mono" id="entryPrice">--</div>
+            <div class="kpi-sub">Actualizado solo</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-label">Cuánto Invertir (2x Seguro)</div>
+            <div class="kpi-val mono" id="posSize">--</div>
+            <div class="kpi-sub" id="posShares">--</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-label">Stop-Loss (Salir si falla)</div>
+            <div class="kpi-val mono neg" id="stopLoss">--</div>
+            <div class="kpi-sub">Con colchón de volatilidad</div>
+          </div>
+          <div class="kpi-box">
+            <div class="kpi-label">Dónde Vender (Cobrar)</div>
+            <div class="kpi-val mono pos" id="takeProfits">--</div>
+            <div class="kpi-sub">Obj 1 / Obj 2</div>
+          </div>
+        </div>
+
+        <div class="reason-box">
+          <div class="reason-headline" id="plainHeadline">Analizando mercados en vivo...</div>
+          <ul class="reason-list" id="plainReasons"></ul>
+          <div class="close-rule" id="whenToClose"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BLOQUE 2: SENALES ACTIVAS EN BIG TECH Y SECTORES IMPACTADOS -->
+    <section class="card">
+      <div class="section-title">
+        <span>2. Señales Activas Ahora en Big Tech y Sectores Impactados por ANT (Comprar / Vender en Corto)</span>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;" id="opCountsPills"></div>
+      </div>
+
+      <div class="pair-banner" id="pairTradeBox">
+        <div>
+          <div style="font-size:11px; text-transform:uppercase; color:var(--muted); font-weight:800;">Trade de Pares Clásico del Documento (IA vs Software Tradicional)</div>
+          <div id="pairSummary" style="font-size:14px; font-weight:700; margin-top:2px;">Analizando diferencial IA vs SaaS...</div>
+        </div>
+        <div class="mono" id="pairDetails" style="font-size:12px;">--</div>
+      </div>
+
+      <div class="grid-4" id="topOpsGrid"></div>
+    </section>
+
+    <!-- BLOQUE 3: GRAFICO INTERACTIVO DE CUALQUIER STOCK VS VWAP -->
+    <section class="card">
+      <div class="section-title">
+        <span id="chartTitle">3. Gráfico en Vivo vs Línea Institucional (VWAP)</span>
+        <span style="font-size:12px;">
+          <span style="color:var(--green);">━━ Precio Real</span> &nbsp;·&nbsp;
+          <span style="color:var(--blue);">━━ Nivel Institucional (VWAP)</span>
+          <span style="color:var(--muted);"> (Haz clic en cualquier acción para ver su gráfico y niveles)</span>
+        </span>
+      </div>
+
+      <div class="ticker-bar" id="tickerBar"></div>
+
+      <div class="selected-strip" id="selectedAssetStrip">
+        <span>Selecciona un ticker arriba o en cualquier tabla para inspeccionar su señal, Stop-Loss y Objetivo.</span>
+      </div>
+
+      <div class="chart-box">
+        <canvas id="liveChart"></canvas>
+      </div>
+    </section>
+
+    <!-- BLOQUE 4: LOS 6 SEMAFOROS AUTOMATICOS -->
+    <section class="card">
+      <div class="section-title">
+        <span>4. Los 6 Semáforos Automáticos de tu Estrategia</span>
+        <span style="font-size:11px;">🟢 Favorable · 🟡 Esperando · 🔴 Precaución / Peligro</span>
+      </div>
+      <div class="grid-3" id="rulesGrid"></div>
+    </section>
+
+    <!-- BLOQUE 5: TABLAS COMPLETAS DE LOS 6 SECTORES CON SENAL, STOP Y OBJETIVO POR ACCION -->
+    <section class="card">
+      <div class="section-title">
+        <span>5. Todos los Stocks Big Tech, Semiconductores, SaaS, Energía Nuclear y Cripto (Señal en Vivo por Activo)</span>
+        <span id="sectorSignalsSummary" class="mono" style="font-size:12px; color:var(--blue);">--</span>
+      </div>
+      <div class="grid-2" id="sectorsGrid"></div>
+    </section>
+
+    <!-- BLOQUE 6: NOTICIAS, SEC EDGAR Y AVISOS -->
+    <section class="grid-2">
+      <div class="card">
+        <div class="section-title">
+          <span>6. Noticias en Vivo & Documentos SEC EDGAR</span>
+          <span id="secAutoBadge" class="pill pill-blue">Auto-escaneo cada 60s</span>
+        </div>
+        <div class="feed-list" id="newsSecList"></div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">
+          <span>7. Historial de Avisos Automáticos</span>
+        </div>
+        <div class="feed-list" id="alertsFeed"></div>
+
+        <details style="margin-top:6px;">
+          <summary>Opcional: Recibir avisos en tu móvil por Telegram</summary>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <input id="tgToken" type="password" placeholder="Telegram Bot Token" style="flex:1; min-width:140px;" />
+              <input id="tgChatId" type="text" placeholder="Telegram Chat ID" style="flex:1; min-width:120px;" />
+            </div>
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+              <label style="font-size:12px;"><input id="tgEnabled" type="checkbox" /> Activar Telegram</label>
+              <button onclick="saveTelegram()">Guardar Telegram</button>
+              <button onclick="testAlert()">Probar Aviso</button>
+              <span id="tgStatus" style="font-size:12px; color:var(--muted);"></span>
+            </div>
+          </div>
+        </details>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const CHART_TICKERS = [
+      "AUTO", "ANT", "QQQ",
+      "GOOGL", "AMZN", "MSFT",
+      "NVDA", "AVGO", "AMD", "TSM", "MU", "CRWV",
+      "CRM", "ADBE", "NOW", "WDAY", "TEAM",
+      "CEG", "VST", "OKLO", "CCJ", "URA",
+      "IREN", "CLSK"
+    ];
+
+    let latestState = null;
+    let selectedChartTicker = "AUTO";
+    let voiceEnabled = true;
+    let lastSignalSpoken = "";
+
+    function tickClocks() {
+      const now = new Date();
+      document.getElementById("clockCet").textContent = now.toLocaleTimeString("es-ES", { timeZone: "Europe/Madrid", hour12: false });
+      document.getElementById("clockEt").textContent = now.toLocaleTimeString("en-US", { timeZone: "America/New_York", hour12: false });
+    }
+    setInterval(tickClocks, 1000);
+    tickClocks();
+
+    function toggleVoice() {
+      voiceEnabled = !voiceEnabled;
+      document.getElementById("voiceBtn").textContent = voiceEnabled ? "Voz / Sonido: ON" : "Voz / Sonido: OFF";
+    }
+
+    function notifyUser(text, urgent) {
+      if (!voiceEnabled) return;
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = urgent ? "triangle" : "sine";
+        osc.frequency.value = urgent ? 760 : 540;
+        gain.gain.setValueAtTime(0.07, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.26);
+      } catch (_) {}
+
+      if (urgent && "speechSynthesis" in window) {
+        try {
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(text);
+          u.lang = "es-ES";
+          window.speechSynthesis.speak(u);
+        } catch (_) {}
+      }
+    }
+
+    function selectChartTicker(sym) {
+      selectedChartTicker = sym;
+      try { localStorage.setItem("ant_selected_ticker", sym); } catch (_) {}
+      if (latestState) renderChartSection(latestState);
+    }
+
+    function findAssetBySymbol(state, sym) {
+      if (!state || !state.intermarket) return null;
+      if (sym === "QQQ") return state.intermarket.benchmark_qqq;
+      for (const sec of Object.values(state.intermarket.sectors)) {
+        const found = sec.tickers.find(t => t.symbol === sym);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function renderChartSection(state) {
+      const barHtml = CHART_TICKERS.map(sym => {
+        const active = selectedChartTicker === sym ? "active-chip" : "";
+        return `<button class="ticker-chip ${active}" onclick="selectChartTicker('${sym}')">${sym === "AUTO" ? "AUTO (Principal)" : sym}</button>`;
+      }).join("");
+      document.getElementById("tickerBar").innerHTML = barHtml;
+
+      let chartPayload = state.decision.live_chart;
+      let assetInfo = findAssetBySymbol(state, chartPayload.symbol);
+
+      if (selectedChartTicker !== "AUTO") {
+        const chosen = findAssetBySymbol(state, selectedChartTicker);
+        if (chosen) {
+          assetInfo = chosen;
+          chartPayload = {
+            symbol: chosen.symbol,
+            label: `${chosen.name || chosen.symbol} (${chosen.symbol}) en Vivo vs VWAP de Hoy`,
+            series: chosen.intraday_series || [],
+            vwap: chosen.vwap,
+            opening_print: chosen.opening_print || null,
+            current_price: chosen.price,
+          };
+        }
+      }
+
+      document.getElementById("chartTitle").textContent = `3. Gráfico en Vivo: ${chartPayload.label}`;
+      if (assetInfo) {
+        const sigCls = `sig-${assetInfo.action_color || "AMBER"}`;
+        const px = assetInfo.price !== null && assetInfo.price !== undefined ? `$${assetInfo.price}` : "--";
+        const vwapTxt = assetInfo.vwap ? `$${assetInfo.vwap}` : "--";
+        const slTxt = assetInfo.stop_loss ? `$${assetInfo.stop_loss}` : "--";
+        const tpTxt = assetInfo.take_profit_1 ? `$${assetInfo.take_profit_1}` : "--";
+        document.getElementById("selectedAssetStrip").innerHTML = `
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <strong class="mono" style="font-size:14px;">${assetInfo.symbol} · ${assetInfo.name || ""}</strong>
+            <span class="sig-tag ${sigCls}">${assetInfo.action}</span>
+            <span class="mono">Precio: <strong>${px}</strong> | VWAP: <strong>${vwapTxt}</strong></span>
+            <span class="mono neg">Stop: ${slTxt}</span>
+            <span class="mono pos">Obj 1: ${tpTxt}</span>
+          </div>
+          <div style="color:var(--muted);">${assetInfo.reason || ""}</div>
+        `;
+      }
+
+      drawChart(chartPayload);
+    }
+
+    function drawChart(chartData) {
+      const canvas = document.getElementById("liveChart");
+      const dpr = window.devicePixelRatio || 1;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = Math.max(320, rect.width * dpr);
+      canvas.height = Math.max(200, rect.height * dpr);
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+
+      const w = rect.width;
+      const h = rect.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const rawSeries = (chartData && chartData.series) || [];
+      const series = rawSeries.map(pt => ({
+        t: pt.t ?? pt.time_cet ?? "",
+        p: Number(pt.p ?? pt.price ?? 0),
+        v: Number(pt.v ?? pt.vwap ?? pt.p ?? pt.price ?? 0),
+      })).filter(pt => pt.p > 0);
+
+      if (series.length < 2) {
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "13px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(
+          `${chartData.symbol || "Activo"} aún en pre-estreno o sin suficientes velas intradía todavía. Selecciona otro stock arriba (ej: NVDA, GOOGL, CRM, QQQ).`,
+          w / 2, h / 2
+        );
+        return;
+      }
+
+      const padL = 60, padR = 18, padT = 20, padB = 26;
+      const pw = w - padL - padR;
+      const ph = h - padT - padB;
+
+      const vals = [];
+      series.forEach(pt => vals.push(pt.p, pt.v));
+      if (chartData.opening_print) vals.push(Number(chartData.opening_print));
+
+      let minY = Math.min(...vals) * 0.996;
+      let maxY = Math.max(...vals) * 1.004;
+      if (maxY - minY < 0.5) { minY -= 0.5; maxY += 0.5; }
+
+      const toX = idx => padL + (idx / (series.length - 1)) * pw;
+      const toY = val => padT + ((maxY - val) / (maxY - minY)) * ph;
+
+      ctx.strokeStyle = "rgba(32, 45, 68, 0.7)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = padT + (ph / 4) * i;
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+        const label = (maxY - ((maxY - minY) / 4) * i).toFixed(2);
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "11px monospace";
+        ctx.textAlign = "right";
+        ctx.fillText(`$${label}`, padL - 6, y + 4);
+      }
+
+      if (chartData.opening_print) {
+        const yOp = toY(Number(chartData.opening_print));
+        ctx.save();
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = "#f59e0b";
+        ctx.beginPath(); ctx.moveTo(padL, yOp); ctx.lineTo(w - padR, yOp); ctx.stroke();
+        ctx.fillStyle = "#f59e0b";
+        ctx.textAlign = "left";
+        ctx.fillText(`Apertura $${Number(chartData.opening_print).toFixed(2)}`, padL + 6, yOp - 5);
+        ctx.restore();
+      }
+
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      series.forEach((pt, i) => {
+        const x = toX(i), y = toY(pt.v);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      const last = series[series.length - 1];
+      ctx.strokeStyle = last.p >= last.v ? "#10b981" : "#ef4444";
+      ctx.lineWidth = 2.6;
+      ctx.beginPath();
+      series.forEach((pt, i) => {
+        const x = toX(i), y = toY(pt.p);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      ctx.fillStyle = "#94a3b8";
+      ctx.font = "11px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(series[0].t, padL, h - 6);
+      ctx.textAlign = "right";
+      ctx.fillText(last.t, w - padR, h - 6);
+    }
+
+    function fmtPx(val) {
+      if (val === null || val === undefined) return "--";
+      const num = Number(val);
+      const dec = num < 2 ? 4 : 2;
+      return `$${num.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec })}`;
+    }
+
+    function render(state) {
+      latestState = state;
+      const d = state.decision;
+      const fs = state.fetch_status;
+      const inter = state.intermarket;
+
+      // Top bar
+      document.getElementById("phaseLabel").textContent = state.phase.label;
+      const feedsPill = document.getElementById("liveFeedsPill");
+      feedsPill.textContent = `Feeds en Vivo: Cripto ${fs.binance} · Bolsa ${fs.yahoo}`;
+      feedsPill.className = "pill pill-green";
+
+      const antBadge = document.getElementById("antLiveBadge");
+      if (state.ant_tape.ant_live_trading) {
+        antBadge.textContent = `ANT EN VIVO: $${state.ant_tape.current_price.toFixed(2)}`;
+        antBadge.className = "pill pill-green";
+      } else {
+        antBadge.textContent = `ANT: ${fs.ant_feed || "Pre-Estreno"}`;
+        antBadge.className = "pill pill-amber";
+      }
+
+      // Hero Action Box
+      const hero = document.getElementById("orderHero");
+      hero.className = `order-hero ${d.signal_color}`;
+      document.getElementById("signalText").textContent = d.signal;
+      document.getElementById("targetTicker").textContent = d.target_ticker;
+      document.getElementById("targetType").textContent = d.is_proxy
+        ? "Proxy líquido en Quantfury (ANT aún no abre)"
+        : "Ticker directo de Anthropic en Quantfury";
+      document.getElementById("entryPrice").textContent = fmtPx(d.entry_price);
+      document.getElementById("posSize").textContent = `$${Number(d.position_size_usd).toLocaleString("en-US")}`;
+      document.getElementById("posShares").textContent = `${d.position_shares} uds (Uso ${d.effective_leverage}x)`;
+      document.getElementById("stopLoss").textContent = fmtPx(d.stop_loss_price);
+      document.getElementById("takeProfits").textContent = `${fmtPx(d.take_profit_1)} / ${fmtPx(d.take_profit_2)}`;
+      document.getElementById("plainHeadline").textContent = d.plain_headline;
+      document.getElementById("plainReasons").innerHTML = d.plain_reasons.map(r => `<li>${r}</li>`).join("");
+      document.getElementById("whenToClose").textContent = `Cuándo vender / cerrar: ${d.when_to_close}`;
+
+      const sigKey = `${d.signal}_${d.target_ticker}`;
+      if (lastSignalSpoken && lastSignalSpoken !== sigKey && d.signal_color !== "AMBER") {
+        notifyUser(`Atención. Nueva señal principal: ${d.signal} en ${d.target_ticker} a ${d.entry_price} dólares.`, true);
+      }
+      lastSignalSpoken = sigKey;
+
+      // Bloque 2: Top Opportunities & Pair Trade
+      const counts = inter.opportunity_counts || { longs: 0, shorts: 0, waits: 0 };
+      document.getElementById("opCountsPills").innerHTML = `
+        <span class="pill pill-green">🟢 ${counts.longs} Comprar</span>
+        <span class="pill pill-red">🔴 ${counts.shorts} Vender en Corto</span>
+        <span class="pill pill-amber">🟡 ${counts.waits} Esperar</span>
+      `;
+
+      const pt = inter.pair_trade;
+      if (pt) {
+        document.getElementById("pairSummary").textContent = pt.summary;
+        document.getElementById("pairDetails").innerHTML = `
+          <span class="pos">LONG ${pt.long_ticker} @ ${fmtPx(pt.long_price)} (Stop ${fmtPx(pt.long_stop)})</span>
+          &nbsp;|&nbsp;
+          <span class="neg">SHORT ${pt.short_ticker} @ ${fmtPx(pt.short_price)} (Stop ${fmtPx(pt.short_stop)})</span>
+          &nbsp;|&nbsp;
+          <span style="color:var(--blue);">Spread: ${pt.spread_pct >= 0 ? "+" : ""}${pt.spread_pct}%</span>
+        `;
+      }
+
+      const ops = inter.top_opportunities || [];
+      document.getElementById("topOpsGrid").innerHTML = ops.length
+        ? ops.map(op => `
+            <div class="op-card ${op.action_color}" onclick="selectChartTicker('${op.symbol}')">
+              <div style="display:flex; justify-content:space-between; align-items:center;">
+                <strong class="mono" style="font-size:15px;">${op.symbol} <span style="font-weight:400; font-size:11px; color:var(--muted);">${op.name}</span></strong>
+                <span class="sig-tag sig-${op.action_color}">${op.action}</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--muted);">
+                <span>${op.sector_name}</span>
+                <span class="mono">Score: ${op.confidence_score}/100</span>
+              </div>
+              <div class="mono" style="font-size:12px;">
+                Precio: <strong>${fmtPx(op.entry_price)}</strong>
+                (<span class="${op.change_pct >= 0 ? 'pos' : 'neg'}">${op.change_pct >= 0 ? '+' : ''}${op.change_pct}%</span>)
+              </div>
+              <div class="mono" style="font-size:11px;">
+                <span class="neg">Stop: ${fmtPx(op.stop_loss)}</span> ·
+                <span class="pos">Obj: ${fmtPx(op.take_profit_1)}</span>
+              </div>
+              <div style="font-size:11px; color:#cbd5e1;">${op.reason}</div>
+            </div>
+          `).join("")
+        : `<div style="grid-column:span 4; color:var(--muted); padding:10px;">Sin señales fuertes activas ahora mismo en los 28 activos. Todas las mesas en modo espera.</div>`;
+
+      // Bloque 3: Live Chart
+      renderChartSection(state);
+
+      // Bloque 4: 6 Traffic Lights
+      document.getElementById("rulesGrid").innerHTML = d.rules_status.map(r => `
+        <div class="light-card">
+          <div class="light-head">
+            <strong style="font-size:12px;">${r.id}. ${r.name}</strong>
+            <span class="dot dot-${r.light}"></span>
+          </div>
+          <div class="mono" style="font-size:11px; font-weight:700; color:var(--blue);">${r.status}</div>
+          <div style="font-size:11px; color:var(--muted);">${r.detail}</div>
+        </div>
+      `).join("");
+
+      // Bloque 5: All 6 Sectors Detailed Tables
+      const sig = inter.signals;
+      const qqq = inter.benchmark_qqq;
+      document.getElementById("sectorSignalsSummary").textContent =
+        `BTC ${fmtPx(sig.btc_price)} (${sig.btc_pct >= 0 ? "+" : ""}${sig.btc_pct}%) | QQQ ${fmtPx(qqq.price)} (${qqq.change_pct >= 0 ? "+" : ""}${qqq.change_pct}% · ${qqq.action}) | Spread IA vs SaaS: ${sig.seat_compression_spread_pct >= 0 ? "+" : ""}${sig.seat_compression_spread_pct}%`;
+
+      document.getElementById("sectorsGrid").innerHTML = Object.values(inter.sectors).map(sec => {
+        const avgCls = sec.avg_change_pct >= 0 ? "pos" : "neg";
+        const rows = sec.tickers.map(t => {
+          const isChartable = t.price !== null && t.price !== undefined && !t.symbol.includes("-USD");
+          const rowClick = isChartable ? `onclick="selectChartTicker('${t.symbol}')"` : "";
+          const rowCls = isChartable ? "clickable" : "";
+          const chg = t.change_pct !== null && t.change_pct !== undefined
+            ? `${t.change_pct >= 0 ? "+" : ""}${t.change_pct}%`
+            : "--";
+          const chgCls = t.change_pct > 0 ? "pos" : (t.change_pct < 0 ? "neg" : "");
+          const vwapInfo = t.vwap
+            ? `${fmtPx(t.vwap)}<div style="font-size:10px; color:${t.vs_vwap_pct >= 0 ? 'var(--green)' : 'var(--red)'};">${t.vs_vwap_pct >= 0 ? '+' : ''}${t.vs_vwap_pct}% vs VWAP</div>`
+            : `<span style="color:var(--muted); font-size:10px;">${t.verdict || '--'}</span>`;
+          const levelsInfo = t.stop_loss
+            ? `<div class="neg">SL: ${fmtPx(t.stop_loss)}</div><div class="pos">TP: ${fmtPx(t.take_profit_1)}</div>`
+            : "--";
+
+          return `<tr class="${rowCls}" ${rowClick}>
+            <td>
+              <strong class="mono">${t.symbol}</strong>
+              <div style="font-size:10px; color:var(--muted);">${t.name || ""}</div>
+            </td>
+            <td><span class="sig-tag sig-${t.action_color || 'AMBER'}">${t.action}</span></td>
+            <td class="num mono">
+              <div>${fmtPx(t.price)}</div>
+              <div class="${chgCls}" style="font-size:11px;">${chg}</div>
+            </td>
+            <td class="num mono">${vwapInfo}</td>
+            <td class="num mono" style="font-size:11px;">${levelsInfo}</td>
+            <td style="font-size:11px; color:#cbd5e1; max-width:240px;">${t.reason || ""}</td>
+          </tr>`;
+        }).join("");
+
+        return `<div class="sector-card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong style="font-size:13px;">${sec.label}</strong>
+            <span class="mono ${avgCls}">${sec.avg_change_pct >= 0 ? "+" : ""}${sec.avg_change_pct}% media</span>
+          </div>
+          <div style="font-size:11px; color:var(--muted);">${sec.transmission}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Activo</th>
+                <th>Señal</th>
+                <th class="num">Precio / Hoy</th>
+                <th class="num">VWAP</th>
+                <th class="num">Stop / Obj</th>
+                <th>Impacto ANT & Motivo</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+      }).join("");
+
+      // Bloque 6: News & SEC EDGAR
+      const sec = state.sec_status || {};
+      document.getElementById("secAutoBadge").textContent = sec.found_424b4
+        ? "SEC: 424B4 PUBLICADO"
+        : `SEC EDGAR: ${sec.filings_count || 0} docs · ${fs.news || ""}`;
+
+      const newsItems = (state.news_headlines || []).map(n => `
+        <div class="feed-item">
+          <a href="${n.link}" target="_blank"><strong>${n.title}</strong></a>
+          <div style="font-size:11px; color:var(--muted); margin-top:2px;">${n.published || ""}</div>
+        </div>
+      `);
+      const secItems = (sec.filings || []).slice(0, 4).map(f => `
+        <div class="feed-item" style="border-left-color:var(--green);">
+          <a href="${f.url}" target="_blank"><strong>[SEC ${f.form}] ${f.entity}</strong></a>
+          <div style="font-size:11px; color:var(--muted);">Fecha: ${f.filing_date}</div>
+        </div>
+      `);
+      document.getElementById("newsSecList").innerHTML = [...secItems, ...newsItems].join("") ||
+        `<div style="color:var(--muted);">Escaneando noticias y SEC EDGAR...</div>`;
+
+      // Alerts Feed
+      const alerts = state.recent_alerts || [];
+      document.getElementById("alertsFeed").innerHTML = alerts.length
+        ? alerts.map(a => `
+            <div class="feed-item" style="border-left-color:${a.severity === 'LULD_HALT' ? 'var(--red)' : 'var(--green)'};">
+              <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--muted);">
+                <strong>${a.category}</strong>
+                <span class="mono">${new Date(a.created_at).toLocaleTimeString("es-ES")}</span>
+              </div>
+              <div style="font-weight:700;">${a.title}</div>
+              <div style="color:#cbd5e1;">${a.message}</div>
+            </div>
+          `).join("")
+        : `<div style="color:var(--muted);">Vigilando en silencio. Cuando aparezca una señal de Compra o Venta aparecerá aquí.</div>`;
+
+      if (state.alerts_config) {
+        document.getElementById("tgEnabled").checked = !!state.alerts_config.telegram_enabled;
+        if (!document.getElementById("tgChatId").value && state.alerts_config.telegram_chat_id) {
+          document.getElementById("tgChatId").value = state.alerts_config.telegram_chat_id;
+        }
+      }
+    }
+
+    function applyClientCapital(state, capitalUsd) {
+      const lev = (state.decision && state.decision.effective_leverage) || 2.0;
+      const notional = Math.round(capitalUsd * lev * 100) / 100;
+      if (state.decision) {
+        state.decision.position_size_usd = notional;
+        state.decision.position_shares = state.decision.entry_price > 0
+          ? Math.round((notional / state.decision.entry_price) * 100) / 100
+          : 0;
+      }
+      return state;
+    }
+
+    async function updateCapital() {
+      const val = parseFloat(document.getElementById("capitalInput").value) || 10000;
+      try { localStorage.setItem("ant_capital_usd", String(val)); } catch (_) {}
+      if (window.__INITIAL_STATE__) {
+        if (latestState) render(applyClientCapital(latestState, val));
+        return;
+      }
+      try {
+        const resp = await fetch("/api/quantfury/calculate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account_equity_usd: val, requested_leverage: 2.0 }),
+        });
+        const data = await resp.json();
+        render(data);
+      } catch (_) {
+        if (latestState) render(applyClientCapital(latestState, val));
+      }
+    }
+
+    async function saveTelegram() {
+      if (window.__INITIAL_STATE__) {
+        document.getElementById("tgStatus").textContent = "Telegram push requiere backend FastAPI/Starlette local o webhook.";
+        return;
+      }
+      await fetch("/api/alerts/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          telegram_enabled: document.getElementById("tgEnabled").checked,
+          telegram_bot_token: document.getElementById("tgToken").value,
+          telegram_chat_id: document.getElementById("tgChatId").value,
+        }),
+      });
+      document.getElementById("tgStatus").textContent = "Guardado.";
+    }
+
+    async function testAlert() {
+      notifyUser("Prueba de aviso de compra y venta activada.", false);
+      if (window.__INITIAL_STATE__) return;
+      await fetch("/api/alerts/test", { method: "POST" });
+      fetch("/api/state").then(r => r.json()).then(render);
+    }
+
+    function connectWS() {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${proto}//${location.host}/ws/telemetry`);
+      ws.onopen = () => {
+        const b = document.getElementById("wsBadge");
+        b.textContent = "EN VIVO (Auto cada 2.5s)";
+        b.className = "pill pill-green";
+      };
+      ws.onmessage = evt => {
+        try { render(JSON.parse(evt.data)); } catch (_) {}
+      };
+      ws.onclose = () => {
+        const b = document.getElementById("wsBadge");
+        b.textContent = "Reconectando...";
+        b.className = "pill pill-red";
+        setTimeout(connectWS, 3000);
+      };
+    }
+
+    try {
+      const savedTicker = localStorage.getItem("ant_selected_ticker");
+      if (savedTicker) selectedChartTicker = savedTicker;
+      const savedCap = parseFloat(localStorage.getItem("ant_capital_usd"));
+      if (savedCap >= 100) document.getElementById("capitalInput").value = savedCap;
+    } catch (_) {}
+
+    if (window.__INITIAL_STATE__) {
+      const b = document.getElementById("wsBadge");
+      b.textContent = "EN VIVO (Streamlit Cloud · Auto 10s)";
+      b.className = "pill pill-green";
+      const cap = parseFloat(document.getElementById("capitalInput").value) || 10000;
+      render(applyClientCapital(window.__INITIAL_STATE__, cap));
+    } else {
+      fetch("/api/state").then(r => r.json()).then(render).catch(() => {});
+      connectWS();
+    }
+    window.addEventListener("resize", () => { if (latestState) renderChartSection(latestState); });
+  </script>
+</body>
+</html>
