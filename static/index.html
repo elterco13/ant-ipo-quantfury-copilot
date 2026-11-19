@@ -553,8 +553,10 @@
 
   <script>
     const CHART_TICKERS = [
-      "AUTO", "ANT", "QQQ",
-      "GOOGL", "AMZN", "MSFT",
+      "AUTO", "ANT",
+      "BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD", "DOGE-USD",
+      "TAO-USD", "RENDER-USD", "FET-USD", "NEAR-USD",
+      "QQQ", "GOOGL", "AMZN", "MSFT",
       "NVDA", "AVGO", "AMD", "TSM", "MU", "CRWV",
       "CRM", "ADBE", "NOW", "WDAY", "TEAM",
       "CEG", "VST", "OKLO", "CCJ", "URA",
@@ -1219,7 +1221,7 @@
       document.getElementById("sectorsGrid").innerHTML = Object.values(inter.sectors).map(sec => {
         const avgCls = sec.avg_change_pct >= 0 ? "pos" : "neg";
         const rows = sec.tickers.map(t => {
-          const isChartable = t.price !== null && t.price !== undefined && !t.symbol.includes("-USD");
+          const isChartable = t.price !== null && t.price !== undefined;
           const rowClick = isChartable ? `onclick="selectChartTicker('${t.symbol}')"` : "";
           const rowCls = isChartable ? "clickable" : "";
           const chg = t.change_pct !== null && t.change_pct !== undefined

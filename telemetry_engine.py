@@ -32,6 +32,7 @@ MADRID_TZ = ZoneInfo("Europe/Madrid")
 NY_TZ = ZoneInfo("America/New_York")
 
 BINANCE_24HR_URL = "https://api.binance.com/api/v3/ticker/24hr"
+BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 GOOGLE_NEWS_RSS_URL = (
     "https://news.google.com/rss/search?q=Anthropic+IPO+price+OR+Nasdaq&hl=en-US&gl=US&ceid=US:en"
@@ -115,8 +116,13 @@ FALLBACK_QUOTES: dict[str, dict[str, Any]] = {
     "BTC-USD": {"price": 68000.00, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
     "ETH-USD": {"price": 2650.00, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
     "SOL-USD": {"price": 175.00, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
+    "BNB-USD": {"price": 620.00, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
+    "XRP-USD": {"price": 1.15, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
+    "DOGE-USD": {"price": 0.35, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
     "TAO-USD": {"price": 460.00, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
     "RENDER-USD": {"price": 7.40, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
+    "FET-USD": {"price": 1.35, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
+    "NEAR-USD": {"price": 5.20, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
 }
 
 ASSET_IMPACT_PROFILES: dict[str, dict[str, str]] = {
@@ -260,21 +266,51 @@ ASSET_IMPACT_PROFILES: dict[str, dict[str, str]] = {
     },
     "SOL-USD": {
         "name": "Solana",
-        "sector": "6. Cripto y Mineros",
+        "sector": "6. Cripto 24/7",
         "bias": "CRYPTO_LIQUIDITY_DRAIN",
-        "impact": "Alta sensibilidad a salidas de capital especulativo minorista hacia ANT.",
+        "impact": "Alta beta minorista; muy líquida en Quantfury 24/7 para scalping de velas rápidas.",
+    },
+    "BNB-USD": {
+        "name": "BNB",
+        "sector": "6. Cripto 24/7",
+        "bias": "CRYPTO_LIQUIDITY_DRAIN",
+        "impact": "Major cripto de alta liquidez 24/7; sigue flujo general de apetito por riesgo.",
+    },
+    "XRP-USD": {
+        "name": "XRP",
+        "sector": "6. Cripto 24/7",
+        "bias": "CRYPTO_LIQUIDITY_DRAIN",
+        "impact": "Alta liquidez minorista y rupturas bruscas intradía operables 24/7 en Quantfury.",
+    },
+    "DOGE-USD": {
+        "name": "Dogecoin",
+        "sector": "6. Cripto 24/7",
+        "bias": "CRYPTO_LIQUIDITY_DRAIN",
+        "impact": "Termómetro puro de flujo especulativo retail 24/7 con alta volatilidad intradía.",
     },
     "TAO-USD": {
         "name": "Bittensor",
-        "sector": "6. Cripto y Mineros",
+        "sector": "6. Cripto IA 24/7",
         "bias": "CRYPTO_LIQUIDITY_DRAIN",
-        "impact": "Token cripto-IA expuesto a fuga temporal de capital especulativo hacia Anthropic.",
+        "impact": "Token cripto-IA expuesto a rotación temporal de capital especulativo hacia Anthropic.",
     },
     "RENDER-USD": {
         "name": "Render",
-        "sector": "6. Cripto y Mineros",
+        "sector": "6. Cripto IA 24/7",
         "bias": "CRYPTO_LIQUIDITY_DRAIN",
-        "impact": "Token cripto-IA con rotación de corto plazo hacia acciones IA tradicionales.",
+        "impact": "Token cripto-IA GPU con correlación directa al sentimiento de infraestructura IA.",
+    },
+    "FET-USD": {
+        "name": "Artificial Superintelligence (FET)",
+        "sector": "6. Cripto IA 24/7",
+        "bias": "CRYPTO_LIQUIDITY_DRAIN",
+        "impact": "Token de agentes IA; alta sensibilidad a noticias y debut de Anthropic.",
+    },
+    "NEAR-USD": {
+        "name": "NEAR Protocol",
+        "sector": "6. Cripto IA 24/7",
+        "bias": "CRYPTO_LIQUIDITY_DRAIN",
+        "impact": "Capa 1 enfocada en IA con alta liquidez y movimientos técnicos limpios sobre VWAP.",
     },
     "IREN": {
         "name": "IREN",
@@ -804,14 +840,50 @@ class TelemetryEngine:
         except Exception as exc:
             self._last_fetch_summary["news"] = f"ERR: {exc}"
 
+    async def _fetch_binance_kline_one(
+        self, client: httpx.AsyncClient, sem: asyncio.Semaphore, b_sym: str
+    ) -> tuple[str, list[Any] | None]:
+        async with sem:
+            try:
+                resp = await client.get(
+                    BINANCE_KLINES_URL,
+                    params={"symbol": b_sym, "interval": "5m", "limit": 48},
+                )
+                if resp.status_code == 200:
+                    return b_sym, resp.json()
+            except Exception:
+                pass
+            return b_sym, None
+
+    @staticmethod
+    def _compute_rsi(closes: list[float], period: int = 14) -> float:
+        if len(closes) < period + 1:
+            return 50.0
+        deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+        gains = [max(d, 0.0) for d in deltas[-period:]]
+        losses = [abs(min(d, 0.0)) for d in deltas[-period:]]
+        avg_g = sum(gains) / period
+        avg_l = sum(losses) / period
+        if avg_l == 0:
+            return 100.0 if avg_g > 0 else 50.0
+        rs = avg_g / avg_l
+        return round(100.0 - (100.0 / (1.0 + rs)), 1)
+
     async def _fetch_binance(self, client: httpx.AsyncClient) -> None:
         symbols = list(BINANCE_SYMBOL_MAP.values())
         reverse_map = {v: k for k, v in BINANCE_SYMBOL_MAP.items()}
         try:
-            resp = await client.get(
+            sem = asyncio.Semaphore(10)
+            ticker_task = client.get(
                 BINANCE_24HR_URL,
                 params={"symbols": json.dumps(symbols, separators=(",", ":"))},
             )
+            klines_tasks = [self._fetch_binance_kline_one(client, sem, s) for s in symbols]
+            resp, *kline_results = await asyncio.gather(ticker_task, *klines_tasks)
+            klines_map: dict[str, list[Any]] = {
+                sym: data for sym, data in kline_results if data
+            }
+
             if resp.status_code == 200:
                 items = resp.json()
                 now_iso = datetime.now(timezone.utc).isoformat()
@@ -824,34 +896,115 @@ class TelemetryEngine:
                     pct = float(item.get("priceChangePercent", 0.0))
                     vol_usd = float(item.get("quoteVolume", 0.0))
                     vel_30s, vel_60s = self._record_tick_velocity(key, price)
-                    verdict = (
-                        "ALCISTA" if pct >= 0.5 else ("BAJISTA" if pct <= -0.5 else "NEUTRAL")
-                    )
                     dec = 4 if price < 2 else 2
-                    crypto_burst = round(abs(vel_60s) / 0.18, 2)
-                    crypto_clv = 0.85 if vel_60s > 0.04 else (0.15 if vel_60s < -0.04 else 0.5)
+
+                    raw_klines = klines_map.get(b_sym) or []
+                    bars: list[dict[str, float]] = []
+                    for k in raw_klines:
+                        o, h, l_val, c, v = float(k[1]), float(k[2]), float(k[3]), float(k[4]), float(k[5])
+                        if c <= 0 or l_val <= 0:
+                            continue
+                        bars.append(
+                            {
+                                "ts": float(k[0]) / 1000.0,
+                                "open": o,
+                                "high": h,
+                                "low": l_val,
+                                "close": c,
+                                "typical": (h + l_val + c) / 3.0,
+                                "volume": v,
+                            }
+                        )
+
+                    cum_pv, cum_vol = 0.0, 0.0
+                    series: list[dict[str, Any]] = []
+                    closes: list[float] = []
+                    vols: list[float] = []
+                    for b in bars:
+                        closes.append(b["close"])
+                        vols.append(b["volume"])
+                        cum_pv += b["typical"] * max(b["volume"], 1e-9)
+                        cum_vol += max(b["volume"], 1e-9)
+                        vwap_val = cum_pv / cum_vol if cum_vol > 0 else b["close"]
+                        t_cet = datetime.fromtimestamp(b["ts"], tz=MADRID_TZ).strftime("%H:%M")
+                        series.append({"t": t_cet, "p": round(b["close"], dec), "v": round(vwap_val, dec)})
+
+                    vwap_final = round(cum_pv / cum_vol, dec) if cum_vol > 0 else round(price, dec)
+                    vs_vwap_pct = round(((price - vwap_final) / vwap_final) * 100.0, 2) if vwap_final > 0 else 0.0
+                    rsi_14 = self._compute_rsi(closes, 14)
+                    hod = round(max((b["high"] for b in bars), default=price), dec)
+                    lod = round(min((b["low"] for b in bars), default=price), dec)
+                    vol_ratio = round(vols[-1] / (sum(vols[:-1]) / len(vols[:-1])), 2) if len(vols) >= 2 and sum(vols[:-1]) > 0 else 1.0
+
+                    prev_ranges = [((b["high"] - b["low"]) / b["low"]) * 100.0 for b in bars[:-1][-12:] if b["low"] > 0]
+                    avg_bar_range_pct = round(sum(prev_ranges) / len(prev_ranges), 3) if prev_ranges else 0.22
+                    if bars:
+                        lb = bars[-1]
+                        last_bar_move_pct = round(((lb["close"] - lb["open"]) / lb["open"]) * 100.0, 3) if lb["open"] > 0 else 0.0
+                        last_bar_range_pct = round(((lb["high"] - lb["low"]) / lb["low"]) * 100.0, 3) if lb["low"] > 0 else 0.0
+                        two_bar_move_pct = (
+                            round(((lb["close"] - bars[-2]["open"]) / bars[-2]["open"]) * 100.0, 3)
+                            if len(bars) >= 2 and bars[-2]["open"] > 0
+                            else last_bar_move_pct
+                        )
+                        span = lb["high"] - lb["low"]
+                        if span > 0:
+                            clv = (lb["close"] - lb["low"]) / span
+                            upper_wick = round(((lb["high"] - max(lb["open"], lb["close"])) / span) * 100.0, 1)
+                            lower_wick = round(((min(lb["open"], lb["close"]) - lb["low"]) / span) * 100.0, 1)
+                        else:
+                            clv = 0.85 if lb["close"] > lb["open"] else (0.15 if lb["close"] < lb["open"] else 0.5)
+                            upper_wick, lower_wick = 0.0, 0.0
+                        midpoint = round((lb["open"] + lb["close"]) / 2.0, dec)
+                        last_bar_cet = datetime.fromtimestamp(lb["ts"], tz=MADRID_TZ).strftime("%d/%m %H:%M CET")
+                        data_age = max(0, int(time.time() - lb["ts"]))
+                    else:
+                        last_bar_move_pct, last_bar_range_pct, two_bar_move_pct = vel_60s, abs(vel_60s), vel_60s
+                        clv, upper_wick, lower_wick = 0.5, 0.0, 0.0
+                        midpoint = round(price, dec)
+                        last_bar_cet = datetime.now(MADRID_TZ).strftime("%d/%m %H:%M CET")
+                        data_age = 0
+
+                    burst_multiple = round(
+                        max(abs(last_bar_move_pct), abs(two_bar_move_pct) * 0.75) / max(0.08, avg_bar_range_pct),
+                        2,
+                    )
+                    verdict = (
+                        "ALCISTA (Sobre VWAP)"
+                        if vs_vwap_pct > 0.10
+                        else ("BAJISTA (Bajo VWAP)" if vs_vwap_pct < -0.10 else "NEUTRAL (En VWAP)")
+                    )
+
                     self.quotes[key] = {
                         "symbol": key,
-                        "price": price,
+                        "price": round(price, dec),
                         "change_pct": round(pct, 2),
                         "volume_usd": round(vol_usd, 0),
-                        "vwap": None,
-                        "vs_vwap_pct": None,
+                        "vwap": vwap_final,
+                        "vs_vwap_pct": vs_vwap_pct,
+                        "rsi_14": rsi_14,
+                        "hod": hod,
+                        "lod": lod,
+                        "vol_ratio": vol_ratio,
                         "verdict": verdict,
                         "tick_velocity_30s_pct": vel_30s,
                         "tick_velocity_60s_pct": vel_60s,
-                        "avg_bar_range_pct": 0.18,
-                        "last_bar_move_pct": vel_60s,
-                        "two_bar_move_pct": vel_60s,
-                        "last_bar_range_pct": abs(vel_60s),
-                        "burst_multiple": crypto_burst,
-                        "clv": crypto_clv,
-                        "candle_midpoint": round(price / (1.0 + vel_60s / 200.0), dec),
-                        "intraday_series": [],
+                        "avg_bar_range_pct": avg_bar_range_pct,
+                        "last_bar_move_pct": last_bar_move_pct,
+                        "two_bar_move_pct": two_bar_move_pct,
+                        "last_bar_range_pct": last_bar_range_pct,
+                        "burst_multiple": burst_multiple,
+                        "clv": round(clv, 3),
+                        "upper_wick_pct": upper_wick,
+                        "lower_wick_pct": lower_wick,
+                        "candle_midpoint": midpoint,
+                        "last_bar_time_cet": last_bar_cet,
+                        "data_age_sec": data_age,
+                        "intraday_series": series[-30:],
                         "source": "LIVE_BINANCE",
                         "updated_at": now_iso,
                     }
-                self._last_fetch_summary["binance"] = f"OK ({len(items)} pares)"
+                self._last_fetch_summary["binance"] = f"OK ({len(items)} pares · 5m)"
             else:
                 self._last_fetch_summary["binance"] = f"HTTP_{resp.status_code}"
         except Exception as exc:
@@ -1457,16 +1610,19 @@ class TelemetryEngine:
                 reason = f"Rango neutro ({chg:+.2f}%). {profile['impact']}"
 
         elif bias == "CRYPTO_LIQUIDITY_DRAIN":
-            if chg <= -1.5:
-                action, action_color = "VENDER EN CORTO (SHORT)", "RED"
-                score = min(94, int(68 + abs(chg) * 4))
-                reason = f"Fuga de liquidez activa ({chg:+.2f}%). {profile['impact']}"
-            elif chg >= 1.5:
+            rsi_val = float(quote.get("rsi_14") or 50.0)
+            two_m = float(quote.get("two_bar_move_pct") or 0.0)
+            bar_t = quote.get("last_bar_time_cet") or "en vivo"
+            if vwap is not None and vs_vwap >= 0.10 and (two_m > 0.05 or chg >= 0.5) and rsi_val < 72:
                 action, action_color = "COMPRAR (LONG)", "GREEN"
-                score = min(90, int(66 + chg * 4))
-                reason = f"Rebote fuerte (+{chg:.2f}%) absorbiendo liquidez. {profile['impact']}"
+                score = min(94, int(68 + vs_vwap * 12 + max(0.0, chg) * 3))
+                reason = f"Sobre VWAP 4h (${vwap}, {vs_vwap:+.2f}%) · RSI(5m): {rsi_val} · Vela {bar_t}. Impulso alcista en vivo."
+            elif vwap is not None and vs_vwap <= -0.10 and (two_m < -0.05 or chg <= -0.5) and rsi_val > 28:
+                action, action_color = "VENDER EN CORTO (SHORT)", "RED"
+                score = min(94, int(68 + abs(vs_vwap) * 12 + abs(min(0.0, chg)) * 3))
+                reason = f"Bajo VWAP 4h (${vwap}, {vs_vwap:+.2f}%) · RSI(5m): {rsi_val} · Vela {bar_t}. Presión vendedora activa."
             else:
-                reason = f"Rango ({chg:+.2f}%). {profile['impact']}"
+                reason = f"En equilibrio (VWAP ${vwap}, RSI {rsi_val}, 24h {chg:+.2f}%, vela {bar_t}). Esperar ruptura."
 
         is_short = "SHORT" in action
         vwap_ref = float(vwap) if vwap is not None else price
@@ -2176,13 +2332,19 @@ class TelemetryEngine:
             chart_open = self.ant_state.get("opening_print")
             chart_price = self.ant_state.get("current_price")
         else:
-            q_chart = self._get_effective_quote(target_ticker)
-            if not q_chart.get("intraday_series"):
-                q_chart = self._get_effective_quote("NVDA")
-                chart_symbol = "NVDA"
+            us_ses_chart = _us_market_session_status()
+            if us_ses_chart["session"] == "CLOSED":
+                chart_symbol = "BTC-USD"
+                q_chart = self._get_effective_quote("BTC-USD")
+                chart_label = "Bitcoin (BTC-USD) 24/7 en Vivo (Velas 5m) vs VWAP 4h"
             else:
-                chart_symbol = target_ticker
-            chart_label = f"{chart_symbol} (Proxy en Vivo mientras debuta ANT) vs VWAP de Hoy"
+                q_chart = self._get_effective_quote(target_ticker)
+                if not q_chart.get("intraday_series"):
+                    q_chart = self._get_effective_quote("NVDA")
+                    chart_symbol = "NVDA"
+                else:
+                    chart_symbol = target_ticker
+                chart_label = f"{chart_symbol} (Proxy en Vivo mientras debuta ANT) vs VWAP de Hoy"
             chart_series = q_chart.get("intraday_series") or []
             chart_vwap = q_chart.get("vwap")
             chart_open = q_chart.get("opening_print")

@@ -89,9 +89,13 @@ SECTORS: dict[str, dict[str, Any]] = {
         "transmission": "Cuello de botella físico (GW firmes para $70.7B en 12M). Liquidez OPI impulsa PPAs.",
     },
     "CRIPTO_MINEROS": {
-        "label": "6. Criptoactivos y Mineros BTC/HPC",
-        "tickers": ["BTC-USD", "ETH-USD", "SOL-USD", "TAO-USD", "RENDER-USD", "IREN", "CLSK"],
-        "transmission": "Drenaje minorista (~$68k BTC, precedente SpaceX). Tokens IA sufren fuga; mineros HPC siguen a ANT.",
+        "label": "6. Criptoactivos (24/7) y Mineros BTC/HPC",
+        "tickers": [
+            "BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD", "XRP-USD", "DOGE-USD",
+            "TAO-USD", "RENDER-USD", "FET-USD", "NEAR-USD",
+            "IREN", "CLSK",
+        ],
+        "transmission": "Mercado 24/7 en vivo (Binance velas 5m + VWAP + RSI). Drenaje minorista previo a OPI y tokens cripto-IA.",
     },
 }
 
@@ -101,8 +105,13 @@ BINANCE_SYMBOL_MAP: dict[str, str] = {
     "BTC-USD": "BTCUSDT",
     "ETH-USD": "ETHUSDT",
     "SOL-USD": "SOLUSDT",
+    "BNB-USD": "BNBUSDT",
+    "XRP-USD": "XRPUSDT",
+    "DOGE-USD": "DOGEUSDT",
     "TAO-USD": "TAOUSDT",
     "RENDER-USD": "RENDERUSDT",
+    "FET-USD": "FETUSDT",
+    "NEAR-USD": "NEARUSDT",
 }
 
 YAHOO_EQUITY_TICKERS: list[str] = [
