@@ -907,9 +907,10 @@
           verdictCode = "EXIT";
           verdictLabel = "🚨 SALIR AHORA (CERRAR)";
           verdictCls = "sig-RED";
+          const vsVwapStr = `${vsVwap >= 0 ? "+" : ""}${vsVwap.toFixed(2)}%`;
           advice = hitStop
             ? `El precio (${fmtPx(livePx)}) tocó tu stop (${fmtPx(tr.trailingStop)}). Cerrar ya en Quantfury.`
-            : (trapAgainst ? `Mecha de rechazo detectada: ${trapAgainst.reason} Protege capital cerrando.` : `Perdió el VWAP (${fmtPx(vwap)}, ${vsVwap:+.2f}%) con momento en contra. Mejor salir y preservar capital.`);
+            : (trapAgainst ? `Mecha de rechazo detectada: ${trapAgainst.reason} Protege capital cerrando.` : `Perdió el VWAP (${fmtPx(vwap)}, ${vsVwapStr}) con momento en contra. Mejor salir y preservar capital.`);
           voiceMsg = `¡Atención! Señal de salida en ${tr.symbol}. ${hitStop ? "Stop alcanzado." : (trapAgainst ? "Mecha de giro." : "Perdió el VWAP.")} Cierra posición.`;
         } else if (hitTp1 || (overextended && pnlPct > 0.25)) {
           verdictCode = "TAKE_PROFIT";
@@ -923,7 +924,8 @@
           verdictCode = "ADD_MORE";
           verdictLabel = "🚀 AGREGAR MÁS DINERO (+25–50%)";
           verdictCls = "sig-GREEN";
-          advice = `Ganando +${pnlPct.toFixed(2)}% alineado con VWAP (${vsVwap:+.2f}%) y RSI con recorrido (${rsi}). Puedes sumar +25% a +50% y subir tu stop a breakeven (${fmtPx(tr.entry)}).`;
+          const vsVwapStr = `${vsVwap >= 0 ? "+" : ""}${vsVwap.toFixed(2)}%`;
+          advice = `Ganando +${pnlPct.toFixed(2)}% alineado con VWAP (${vsVwapStr}) y RSI con recorrido (${rsi}). Puedes sumar +25% a +50% y subir tu stop a breakeven (${fmtPx(tr.entry)}).`;
           voiceMsg = `Oportunidad para agregar capital en ${tr.symbol}. Tendencia confirmada sobre VWAP con recorrido.`;
         } else if (rMult >= 0.8) {
           verdictCode = "BREAKEVEN";
