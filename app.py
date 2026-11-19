@@ -279,6 +279,17 @@ async def test_alert(_request: Request) -> JSONResponse:
     return JSONResponse({"alert": rec, "recent_alerts": alert_manager.list_alerts(limit=15)})
 
 
+class FinnhubConfigReq(BaseModel):
+    api_key: str = ""
+
+
+async def configure_finnhub_feed(request: Request) -> JSONResponse:
+    req = await _parse_body(request, FinnhubConfigReq)
+    res = await engine.configure_finnhub(req.api_key)
+    await broadcast_state()
+    return JSONResponse(res)
+
+
 async def list_mcp_tools(_request: Request) -> JSONResponse:
     return JSONResponse({"tools": MCP_TOOLS_SCHEMA})
 
@@ -326,6 +337,7 @@ app = Starlette(
         Route("/api/quantfury/calculate", calc_quantfury, methods=["POST"]),
         Route("/api/alerts/config", update_alerts_cfg, methods=["POST"]),
         Route("/api/alerts/test", test_alert, methods=["POST"]),
+        Route("/api/feeds/finnhub", configure_finnhub_feed, methods=["POST"]),
         Route("/api/mcp/tools", list_mcp_tools, methods=["GET"]),
         Route("/api/mcp/call", call_mcp_tool, methods=["POST"]),
         WebSocketRoute("/ws/telemetry", ws_telemetry),

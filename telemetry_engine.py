@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import math
+import os
 import re
 import time
 from typing import Any
@@ -11,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 import feedparser
 import httpx
+import websockets
 
 from alerts import AlertManager
 from config import (
@@ -34,6 +36,17 @@ YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
 GOOGLE_NEWS_RSS_URL = (
     "https://news.google.com/rss/search?q=Anthropic+IPO+price+OR+Nasdaq&hl=en-US&gl=US&ceid=US:en"
 )
+NASDAQ_HALTS_RSS_URL = "https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts"
+FINNHUB_PRIORITY_TICKERS = ["ANT", "NVDA", "GOOGL", "AMZN", "MSFT", "CRM", "ADBE", "QQQ", "AVGO", "AMD", "CEG", "CRWV"]
+
+HALT_REASON_LABELS: dict[str, str] = {
+    "LUDP": "Pausa de Volatilidad LULD (5 min)",
+    "M": "Pausa de Volatilidad LULD",
+    "IPO1": "Subasta de Estreno OPI (IPO Cross — aún no cotiza)",
+    "T1": "Noticia Pendiente",
+    "T2": "Noticia Publicada — Reapertura inminente",
+    "T12": "Información adicional solicitada por Nasdaq",
+}
 
 FALLBACK_QUOTES: dict[str, dict[str, Any]] = {
     "QQQ": {"price": 512.40, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
@@ -374,14 +387,20 @@ def _compute_intraday_metrics(result_obj: dict[str, Any]) -> dict[str, Any]:
         span = lb["high"] - lb["low"]
         if span > 0:
             clv = (lb["close"] - lb["low"]) / span
+            upper_wick_pct = round(((lb["high"] - max(lb["open"], lb["close"])) / span) * 100.0, 1)
+            lower_wick_pct = round(((min(lb["open"], lb["close"]) - lb["low"]) / span) * 100.0, 1)
         else:
             clv = 0.85 if lb["close"] > lb["open"] else (0.15 if lb["close"] < lb["open"] else 0.5)
+            upper_wick_pct = 0.0
+            lower_wick_pct = 0.0
         candle_midpoint = round((lb["open"] + lb["close"]) / 2.0, 2)
     else:
         last_bar_move_pct = 0.0
         last_bar_range_pct = 0.0
         two_bar_move_pct = 0.0
         clv = 0.5
+        upper_wick_pct = 0.0
+        lower_wick_pct = 0.0
         candle_midpoint = round(last_px, 2)
 
     burst_multiple = round(
@@ -411,6 +430,8 @@ def _compute_intraday_metrics(result_obj: dict[str, Any]) -> dict[str, Any]:
         "last_bar_range_pct": last_bar_range_pct,
         "burst_multiple": burst_multiple,
         "clv": round(clv, 3),
+        "upper_wick_pct": upper_wick_pct,
+        "lower_wick_pct": lower_wick_pct,
         "candle_midpoint": candle_midpoint,
         "intraday_series": series[-30:],
         "market_state": meta.get("marketState", "UNKNOWN"),
@@ -478,6 +499,16 @@ class TelemetryEngine:
         }
 
         self._price_history: dict[str, list[tuple[float, float]]] = {}
+        self.nasdaq_halts: dict[str, Any] = {
+            "checked_at": None,
+            "status": "PENDING",
+            "ant_halt": None,
+            "watchlist_halts": [],
+            "recent_market_halts": [],
+        }
+        self._last_halt_scan_ts: float = 0.0
+        self._finnhub_key: str = os.getenv("FINNHUB_API_KEY", "").strip()
+        self._finnhub_task: asyncio.Task[Any] | None = None
         self._running = False
         self._task: asyncio.Task[Any] | None = None
         self._last_fetch_summary: dict[str, Any] = {
@@ -485,6 +516,8 @@ class TelemetryEngine:
             "yahoo": "PENDING",
             "ant_feed": "PENDING",
             "news": "PENDING",
+            "nasdaq_halts": "PENDING",
+            "finnhub_ws": "CONECTANDO..." if self._finnhub_key else "OPCIONAL (Yahoo 5s)",
         }
 
     def _record_tick_velocity(self, symbol: str, price: float) -> tuple[float, float]:
@@ -508,23 +541,146 @@ class TelemetryEngine:
         return round(vel_30s, 3), round(vel_60s, 3)
 
     async def start(self) -> None:
-        """Start background 5-second telemetry loop + 60-second SEC/news scanner."""
+        """Start background 5-second telemetry loop + 60-second SEC/news scanner + optional Finnhub WS."""
         if self._running:
             return
         self._running = True
         await self.refresh_market_data()
         await self._refresh_sec_and_news()
         self._task = asyncio.create_task(self._loop())
+        if self._finnhub_key:
+            self._finnhub_task = asyncio.create_task(self._finnhub_ws_loop())
 
     async def stop(self) -> None:
         """Stop background telemetry loop cleanly."""
         self._running = False
-        if self._task:
-            self._task.cancel()
+        for t in (self._task, self._finnhub_task):
+            if t:
+                t.cancel()
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    pass
+
+    async def configure_finnhub(self, api_key: str) -> dict[str, Any]:
+        """Enable or disable optional sub-second Finnhub US equity WebSocket feed."""
+        self._finnhub_key = api_key.strip()
+        if self._finnhub_task:
+            self._finnhub_task.cancel()
             try:
-                await self._task
+                await self._finnhub_task
             except asyncio.CancelledError:
                 pass
+            self._finnhub_task = None
+
+        if self._finnhub_key and self._running:
+            self._last_fetch_summary["finnhub_ws"] = "CONECTANDO..."
+            self._finnhub_task = asyncio.create_task(self._finnhub_ws_loop())
+        else:
+            self._last_fetch_summary["finnhub_ws"] = "OPCIONAL (Yahoo 5s)"
+        return {"finnhub_enabled": bool(self._finnhub_key), "status": self._last_fetch_summary["finnhub_ws"]}
+
+    async def _finnhub_ws_loop(self) -> None:
+        """Stream real-time sub-second US equity ticks from Finnhub when an API key is provided."""
+        url = f"wss://ws.finnhub.io?token={self._finnhub_key}"
+        while self._running and self._finnhub_key:
+            try:
+                async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
+                    for sym in FINNHUB_PRIORITY_TICKERS:
+                        await ws.send(json.dumps({"type": "subscribe", "symbol": sym}))
+                    self._last_fetch_summary["finnhub_ws"] = f"EN VIVO (<300ms · {len(FINNHUB_PRIORITY_TICKERS)} tickers)"
+                    async for raw in ws:
+                        msg = json.loads(raw)
+                        if msg.get("type") != "trade":
+                            continue
+                        for trade in msg.get("data") or []:
+                            sym = trade.get("s")
+                            px = float(trade.get("p") or 0.0)
+                            vol = float(trade.get("v") or 1.0)
+                            if not sym or px <= 0:
+                                continue
+                            vel_30s, vel_60s = self._record_tick_velocity(sym, px)
+                            if sym == "ANT":
+                                self.ant_state["ant_live_trading"] = True
+                                self.add_ant_tick(px, vol)
+                                self.ant_state["tick_velocity_30s_pct"] = vel_30s
+                                self.ant_state["tick_velocity_60s_pct"] = vel_60s
+                                self._last_fetch_summary["ant_feed"] = f"FINNHUB WS (${px:.2f})"
+                            elif sym in self.quotes:
+                                q = self.quotes[sym]
+                                q["price"] = round(px, 2)
+                                q["tick_velocity_30s_pct"] = vel_30s
+                                q["tick_velocity_60s_pct"] = vel_60s
+                                q["source"] = "FINNHUB_WS"
+                                prev_c = q.get("prev_close")
+                                if prev_c and float(prev_c) > 0:
+                                    q["change_pct"] = round(((px - float(prev_c)) / float(prev_c)) * 100.0, 2)
+                                vwap = q.get("vwap")
+                                if vwap and float(vwap) > 0:
+                                    q["vs_vwap_pct"] = round(((px - float(vwap)) / float(vwap)) * 100.0, 2)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                self._last_fetch_summary["finnhub_ws"] = f"RECONECTANDO ({exc})"
+                await asyncio.sleep(5.0)
+
+    async def _fetch_nasdaq_halts(self, client: httpx.AsyncClient) -> None:
+        """Poll official Nasdaq Trade Halts RSS feed for LULD/IPO1 halts on ANT and watchlist stocks."""
+        if (time.monotonic() - self._last_halt_scan_ts) < 15.0 and self.nasdaq_halts["checked_at"]:
+            return
+        self._last_halt_scan_ts = time.monotonic()
+        watch_set = set(YAHOO_EQUITY_TICKERS) | {"ANT"}
+        try:
+            resp = await client.get(NASDAQ_HALTS_RSS_URL)
+            if resp.status_code != 200:
+                self._last_fetch_summary["nasdaq_halts"] = f"HTTP_{resp.status_code}"
+                return
+            feed = feedparser.parse(resp.text)
+            watchlist_halts: list[dict[str, Any]] = []
+            recent_market: list[dict[str, Any]] = []
+            ant_halt: dict[str, Any] | None = None
+
+            for entry in feed.entries[:40]:
+                sym = str(entry.get("title") or "").strip().upper()
+                code = str(entry.get("ndaq_reasoncode") or "").strip().upper()
+                halt_date = str(entry.get("ndaq_haltdate") or "")
+                halt_time = str(entry.get("ndaq_halttime") or "")
+                resump_time = str(entry.get("ndaq_resumptiontradetime") or "")
+                is_active = not bool(resump_time.strip())
+                rec = {
+                    "symbol": sym,
+                    "reason_code": code,
+                    "reason_label": HALT_REASON_LABELS.get(code, f"Código {code}"),
+                    "halt_date": halt_date,
+                    "halt_time_et": halt_time,
+                    "resumption_time_et": resump_time or "Pendiente",
+                    "is_active": is_active,
+                }
+                if len(recent_market) < 5:
+                    recent_market.append(rec)
+                if sym in watch_set:
+                    watchlist_halts.append(rec)
+                    if sym == "ANT" and ant_halt is None:
+                        ant_halt = rec
+
+            self.nasdaq_halts = {
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "status": "OK",
+                "ant_halt": ant_halt,
+                "watchlist_halts": watchlist_halts,
+                "recent_market_halts": recent_market,
+            }
+            if ant_halt and ant_halt["is_active"] and ant_halt["reason_code"] in {"LUDP", "M", "T1"}:
+                self.ant_state["luld_halt_active"] = True
+                self.ant_state["luld_reason"] = (
+                    f"HALT OFICIAL NASDAQ ({ant_halt['reason_code']}): {ant_halt['reason_label']} "
+                    f"desde {ant_halt['halt_time_et']} ET (Reapertura: {ant_halt['resumption_time_et']})."
+                )
+            self._last_fetch_summary["nasdaq_halts"] = (
+                f"ALERTA ({len(watchlist_halts)} en lista)" if watchlist_halts else f"OK ({len(feed.entries)} mercado)"
+            )
+        except Exception as exc:
+            self._last_fetch_summary["nasdaq_halts"] = f"ERR: {exc}"
 
     async def _loop(self) -> None:
         while self._running:
@@ -538,7 +694,7 @@ class TelemetryEngine:
                 pass
 
     async def refresh_market_data(self) -> None:
-        """Fetch live Binance crypto tickers, Yahoo Finance US equities + intraday VWAP, and ANT live."""
+        """Fetch live Binance crypto, Yahoo US equities + intraday VWAP, ANT live, and Nasdaq Trade Halts."""
         async with httpx.AsyncClient(
             timeout=7.0,
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
@@ -548,6 +704,7 @@ class TelemetryEngine:
                 self._fetch_binance(client),
                 self._fetch_yahoo_all(client),
                 self._fetch_ant_live(client),
+                self._fetch_nasdaq_halts(client),
             )
 
     async def _refresh_sec_and_news(self) -> None:
@@ -1470,6 +1627,7 @@ class TelemetryEngine:
         """Detect explosive momentum candles mid-move for rapid LONG/SHORT scalping in Quantfury."""
         candidates: list[dict[str, Any]] = []
         fallback_watch: list[dict[str, Any]] = []
+        wick_traps: list[dict[str, Any]] = []
 
         for item in all_evaluated:
             sym = item["symbol"]
@@ -1482,10 +1640,42 @@ class TelemetryEngine:
             burst = float(item.get("burst_multiple") or 0.0)
             last_move = float(item.get("last_bar_move_pct") or 0.0)
             two_move = float(item.get("two_bar_move_pct") or 0.0)
+            last_range = float(item.get("last_bar_range_pct") or 0.0)
             vel_60s = float(item.get("tick_velocity_60s_pct") or 0.0)
             clv = float(item.get("clv") if item.get("clv") is not None else 0.5)
+            upper_wick = float(item.get("upper_wick_pct") or 0.0)
+            lower_wick = float(item.get("lower_wick_pct") or 0.0)
             midpoint = float(item.get("candle_midpoint") or price)
             vol_ratio = float(item.get("vol_ratio") or 1.0)
+
+            # Exhaustion Wick Reversal Detector (mechas de trampa >= 42% en velas amplias)
+            if last_range >= 0.40 or burst >= 1.35:
+                if upper_wick >= 42.0:
+                    wick_traps.append(
+                        {
+                            "symbol": sym,
+                            "name": item.get("name", sym),
+                            "trap_type": "UPPER_WICK_TRAP",
+                            "label": "🔴 TRAMPA DE TECHO (Rechazo)",
+                            "action_hint": "CERRAR LONG / VIGILAR SHORT",
+                            "wick_pct": upper_wick,
+                            "price": round(price, 2),
+                            "reason": f"Mecha superior del {upper_wick:.0f}% en vela amplia ({last_range:.2f}%): rechazo institucional / toma de beneficios.",
+                        }
+                    )
+                elif lower_wick >= 42.0:
+                    wick_traps.append(
+                        {
+                            "symbol": sym,
+                            "name": item.get("name", sym),
+                            "trap_type": "LOWER_WICK_TRAP",
+                            "label": "🟢 RECHAZO DE SUELO (Absorción)",
+                            "action_hint": "CERRAR SHORT / VIGILAR REBOTE",
+                            "wick_pct": lower_wick,
+                            "price": round(price, 2),
+                            "reason": f"Mecha inferior del {lower_wick:.0f}% en vela amplia ({last_range:.2f}%): compradores defendiendo la caída.",
+                        }
+                    )
 
             effective_burst = round(max(burst, abs(vel_60s) / 0.18), 2)
             primary_move = vel_60s if abs(vel_60s) >= abs(last_move) else last_move
@@ -1567,10 +1757,12 @@ class TelemetryEngine:
         if len(accelerating_watch) < 4:
             accelerating_watch.extend(fallback_watch[: 4 - len(accelerating_watch)])
 
+        wick_traps.sort(key=lambda x: x["wick_pct"], reverse=True)
         return {
             "active_alerts": active_alerts[:8],
             "accelerating_watch": accelerating_watch[:6],
             "all_candidates": candidates[:12],
+            "wick_traps": wick_traps[:6],
             "active_count": len(active_alerts),
             "top_flash": active_alerts[0] if active_alerts else (accelerating_watch[0] if accelerating_watch else None),
         }
@@ -2009,6 +2201,19 @@ class TelemetryEngine:
                     cooldown_seconds=120.0,
                 )
 
+        for h in self.nasdaq_halts.get("watchlist_halts") or []:
+            if h["is_active"]:
+                await self.alerts.emit(
+                    severity="LULD_HALT",
+                    category="NASDAQ_HALT",
+                    title=f"HALT OFICIAL NASDAQ en {h['symbol']} ({h['reason_code']})",
+                    message=f"{h['reason_label']} desde {h['halt_time_et']} ET. Reapertura: {h['resumption_time_et']}.",
+                    dedup_key=f"nasdaq_halt_{h['symbol']}_{h['halt_time_et']}",
+                    cooldown_seconds=180.0,
+                )
+
+        return None
+
     def get_full_state(self) -> dict[str, Any]:
         phase = self._detect_current_phase()
         matrix = self._compute_intermarket_matrix()
@@ -2045,6 +2250,8 @@ class TelemetryEngine:
             "fetch_status": self._last_fetch_summary,
             "prospectus": self.prospectus,
             "sec_status": self.sec_status,
+            "nasdaq_halts": self.nasdaq_halts,
+            "finnhub_enabled": bool(self._finnhub_key),
             "news_headlines": self.news_headlines,
             "ant_tape": {
                 **self.ant_state,

@@ -339,6 +339,7 @@
 
     <div class="top-right">
       <span id="liveFeedsPill" class="pill pill-blue">Conectando feeds...</span>
+      <span id="nasdaqHaltPill" class="pill pill-green">Nasdaq Halts: OK</span>
       <div class="capital-box">
         <span style="font-size:12px; color:var(--muted);">Mi Capital Quantfury ($):</span>
         <input id="capitalInput" type="number" min="100" step="500" value="10000" style="width:90px;" onchange="updateCapital()" />
@@ -348,11 +349,26 @@
   </header>
 
   <main>
+    <!-- BANNER OFICIAL NASDAQ TRADE HALTS -->
+    <div id="nasdaqHaltBanner" style="display:none; background:rgba(239,68,68,0.18); border:2px solid var(--red); border-radius:10px; padding:12px 16px; font-weight:700; color:#fecaca;"></div>
+
+    <!-- GESTOR DE OPERACIONES ACTIVAS EN QUANTFURY (TRAILING STOP POR VOZ) -->
+    <section id="activeTradesSection" class="card" style="display:none; border-color:var(--blue);">
+      <div class="section-title">
+        <span>🎯 Mis Operaciones Activas en Quantfury (Breakeven + Trailing Stop Automático por Voz)</span>
+        <span id="activeTradesPnlPill" class="pill pill-blue">P&L Total: $0.00</span>
+      </div>
+      <div class="grid-3" id="activeTradesGrid"></div>
+    </section>
+
     <!-- BLOQUE 1: ORDEN PRINCIPAL DE ANT -->
     <section class="card">
       <div class="section-title">
         <span>1. Orden Principal de la OPI de Anthropic (ANT) para Quantfury</span>
-        <span id="antLiveBadge" class="pill pill-amber">ANT: Pre-Estreno</span>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <button id="heroEnterBtn" class="ticker-chip active-chip" onclick="enterFromHero()">+ Entré en Quantfury</button>
+          <span id="antLiveBadge" class="pill pill-amber">ANT: Pre-Estreno</span>
+        </div>
       </div>
 
       <div id="orderHero" class="order-hero AMBER">
@@ -417,6 +433,12 @@
         Detecta velas que están acelerando a mitad de camino con cuerpo lleno (sin mecha de rechazo) para entrar en <strong style="color:var(--green);">LONG</strong> o <strong style="color:var(--red);">SHORT</strong> rápido en Quantfury, con Stop-Loss ceñido al 50% de la vela.
       </div>
       <div class="grid-3" id="flashGrid"></div>
+      <div id="wickTrapsContainer" style="display:none; margin-top:4px; border-top:1px dashed var(--border); padding-top:10px;">
+        <div style="font-size:11px; text-transform:uppercase; font-weight:800; color:var(--amber); margin-bottom:6px;">
+          ⚠️ Detector de Mechas de Trampa / Agotamiento (Señal de Salida o Giro)
+        </div>
+        <div class="grid-3" id="wickTrapsGrid"></div>
+      </div>
     </section>
 
     <!-- BLOQUE 2: SENALES ACTIVAS EN BIG TECH Y SECTORES IMPACTADOS -->
@@ -494,7 +516,7 @@
         <div class="feed-list" id="alertsFeed"></div>
 
         <details style="margin-top:6px;">
-          <summary>Opcional: Recibir avisos en tu móvil por Telegram</summary>
+          <summary>Opcional: Telegram Móvil y Feed Sub-Segundo Finnhub WebSocket (&lt;300ms)</summary>
           <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
               <input id="tgToken" type="password" placeholder="Telegram Bot Token" style="flex:1; min-width:140px;" />
@@ -505,6 +527,11 @@
               <button onclick="saveTelegram()">Guardar Telegram</button>
               <button onclick="testAlert()">Probar Aviso</button>
               <span id="tgStatus" style="font-size:12px; color:var(--muted);"></span>
+            </div>
+            <div style="border-top:1px dashed var(--border); padding-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+              <input id="finnhubKeyInput" type="password" placeholder="Finnhub API Key (gratis en finnhub.io para ticks <300ms)" style="flex:1; min-width:220px;" />
+              <button onclick="saveFinnhub()">Activar Finnhub WS</button>
+              <span id="finnhubStatus" style="font-size:11px; color:var(--muted);"></span>
             </div>
           </div>
         </details>
@@ -621,10 +648,218 @@
                 <span class="neg">Stop Mitad Vela: ${fmtPx(item.scalp_stop_loss)}</span> ·
                 <span class="pos">TP1: ${fmtPx(item.scalp_take_profit_1)} / TP2: ${fmtPx(item.scalp_take_profit_2)}</span>
               </div>
-              <div style="font-size:11px; color:#cbd5e1;">${item.reason}</div>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-top:2px;">
+                <span style="font-size:11px; color:#cbd5e1; flex:1;">${item.reason}</span>
+                <button class="ticker-chip" onclick="event.stopPropagation(); enterPosition('${item.symbol}', '${item.direction}', ${item.entry_price}, ${item.scalp_stop_loss}, ${item.scalp_take_profit_1}, ${item.position_size_usd})">+ Entré</button>
+              </div>
             </div>`;
           }).join("")
         : `<div style="grid-column:span 3; color:var(--muted); padding:10px;">Sin velas explosivas activas todavía. El radar vigila cada 5s en vivo.</div>`;
+
+      // Exhaustion Wick Traps sub-panel
+      const traps = fc.wick_traps || [];
+      const trapBox = document.getElementById("wickTrapsContainer");
+      if (traps.length > 0) {
+        trapBox.style.display = "block";
+        document.getElementById("wickTrapsGrid").innerHTML = traps.map(tr => `
+          <div class="op-card ${tr.trap_type === 'UPPER_WICK_TRAP' ? 'RED' : 'GREEN'}" onclick="selectChartTicker('${tr.symbol}')">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <strong class="mono">${tr.symbol} · ${fmtPx(tr.price)}</strong>
+              <span class="sig-tag ${tr.trap_type === 'UPPER_WICK_TRAP' ? 'sig-RED' : 'sig-GREEN'}">${tr.label}</span>
+            </div>
+            <div style="font-size:11px; font-weight:700; color:var(--amber);">${tr.action_hint}</div>
+            <div style="font-size:11px; color:#cbd5e1;">${tr.reason}</div>
+          </div>
+        `).join("");
+      } else {
+        trapBox.style.display = "none";
+      }
+    }
+
+    // --- LIVE TRADE MANAGER (TRAILING STOP & BREAKEVEN POR VOZ) ---
+    let openTrades = [];
+    let lastHaltKey = "";
+
+    function loadOpenTrades() {
+      try {
+        const raw = localStorage.getItem("ant_open_trades_v1");
+        if (raw) openTrades = JSON.parse(raw) || [];
+      } catch (_) { openTrades = []; }
+    }
+    function saveOpenTrades() {
+      try { localStorage.setItem("ant_open_trades_v1", JSON.stringify(openTrades)); } catch (_) {}
+    }
+
+    function enterPosition(symbol, direction, entryPrice, stopLoss, tp1, notionalUsd) {
+      const cap = parseFloat(document.getElementById("capitalInput").value) || 10000;
+      const notional = notionalUsd || cap * 2.0;
+      const dir = direction.includes("SHORT") ? "SHORT" : "LONG";
+      const entry = Number(entryPrice);
+      const sl = Number(stopLoss);
+      const risk = Math.max(entry * 0.005, Math.abs(entry - sl));
+      openTrades.unshift({
+        id: `${symbol}_${Date.now()}`,
+        symbol,
+        direction: dir,
+        entry,
+        initialStop: sl,
+        trailingStop: sl,
+        tp1: Number(tp1),
+        risk,
+        notional,
+        breakevenNotified: false,
+        tp1Notified: false,
+        exitNotified: false,
+        openedAt: new Date().toLocaleTimeString("es-ES"),
+      });
+      saveOpenTrades();
+      notifyUser(`Operación registrada: ${dir} en ${symbol} a ${entry} dólares.`, false);
+      if (latestState) renderActiveTrades(latestState);
+    }
+
+    function enterFromHero() {
+      if (!latestState || !latestState.decision) return;
+      const d = latestState.decision;
+      const dir = d.signal.includes("SHORT") ? "SHORT" : "LONG";
+      enterPosition(d.target_ticker, dir, d.entry_price, d.stop_loss_price, d.take_profit_1, d.position_size_usd);
+    }
+
+    function closePosition(id) {
+      openTrades = openTrades.filter(t => t.id !== id);
+      saveOpenTrades();
+      if (latestState) renderActiveTrades(latestState);
+    }
+
+    function renderActiveTrades(state) {
+      const sec = document.getElementById("activeTradesSection");
+      if (!openTrades.length) {
+        sec.style.display = "none";
+        return;
+      }
+      sec.style.display = "flex";
+      const traps = (state.flash_candles && state.flash_candles.wick_traps) || [];
+      let totalPnl = 0;
+
+      const cards = openTrades.map(tr => {
+        const asset = findAssetBySymbol(state, tr.symbol);
+        const livePx = asset && asset.price ? Number(asset.price) : tr.entry;
+        const delta = tr.direction === "LONG" ? (livePx - tr.entry) : (tr.entry - livePx);
+        const pnlPct = tr.entry > 0 ? (delta / tr.entry) * 100 : 0;
+        const pnlUsd = (tr.notional * pnlPct) / 100;
+        totalPnl += pnlUsd;
+        const rMult = tr.risk > 0 ? (delta / tr.risk) : 0;
+
+        // Auto-Breakeven at +0.8R and Profit Trail at +1.3R
+        let statusTag = "EN CURSO";
+        let statusCls = "sig-AMBER";
+        if (rMult >= 1.3) {
+          const lockedStop = tr.direction === "LONG"
+            ? Math.max(tr.trailingStop, tr.entry + delta * 0.5)
+            : Math.min(tr.trailingStop, tr.entry - delta * 0.5);
+          tr.trailingStop = Number(lockedStop.toFixed(livePx < 2 ? 4 : 2));
+          statusTag = "TRAILING ACTIVO (+1.3R)";
+          statusCls = "sig-GREEN";
+          if (!tr.tp1Notified) {
+            tr.tp1Notified = true;
+            notifyUser(`¡Objetivo alcanzado en ${tr.symbol}! Asegura ganancias o sube tu stop a ${tr.trailingStop}.`, true);
+          }
+        } else if (rMult >= 0.8) {
+          tr.trailingStop = tr.direction === "LONG"
+            ? Math.max(tr.trailingStop, tr.entry)
+            : Math.min(tr.trailingStop, tr.entry);
+          statusTag = "BREAKEVEN PROTEGIDO";
+          statusCls = "sig-GREEN";
+          if (!tr.breakevenNotified) {
+            tr.breakevenNotified = true;
+            notifyUser(`${tr.symbol} alcanzó cero punto ocho R. Sube tu stop a breakeven en ${tr.entry} dólares.`, true);
+          }
+        }
+
+        const hitStop = tr.direction === "LONG" ? livePx <= tr.trailingStop : livePx >= tr.trailingStop;
+        const trapAgainst = traps.find(w =>
+          w.symbol === tr.symbol && (
+            (tr.direction === "LONG" && w.trap_type === "UPPER_WICK_TRAP") ||
+            (tr.direction === "SHORT" && w.trap_type === "LOWER_WICK_TRAP")
+          )
+        );
+
+        let exitWarn = "";
+        if (hitStop || trapAgainst) {
+          statusTag = hitStop ? "🚨 STOP ALCANZADO — CERRAR" : "⚠️ MECHA DE GIRO — PROTEGER";
+          statusCls = "sig-RED";
+          exitWarn = hitStop
+            ? `Precio (${fmtPx(livePx)}) tocó tu stop (${fmtPx(tr.trailingStop)}). ¡Cerrar ahora en Quantfury!`
+            : trapAgainst.reason;
+          if (!tr.exitNotified) {
+            tr.exitNotified = true;
+            notifyUser(`¡Atención! Cerrar ahora ${tr.symbol}. ${hitStop ? "Stop alcanzado." : "Mecha de rechazo detectada."}`, true);
+          }
+        }
+
+        return `<div class="op-card ${pnlUsd >= 0 ? 'GREEN' : 'RED'}" onclick="selectChartTicker('${tr.symbol}')">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <strong class="mono">${tr.direction} ${tr.symbol}</strong>
+            <span class="sig-tag ${statusCls}">${statusTag}</span>
+          </div>
+          <div class="mono" style="font-size:16px; font-weight:800;" class="${pnlUsd >= 0 ? 'pos' : 'neg'}">
+            <span class="${pnlUsd >= 0 ? 'pos' : 'neg'}">${pnlUsd >= 0 ? '+' : ''}$${pnlUsd.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}% · ${rMult >= 0 ? '+' : ''}${rMult.toFixed(2)}R)</span>
+          </div>
+          <div class="mono" style="font-size:11px; color:var(--muted);">
+            Entrada: ${fmtPx(tr.entry)} · Vivo: <strong>${fmtPx(livePx)}</strong> · Stop Actual: <strong class="neg">${fmtPx(tr.trailingStop)}</strong> · Obj: <strong class="pos">${fmtPx(tr.tp1)}</strong>
+          </div>
+          ${exitWarn ? `<div style="font-size:11px; color:#fecaca; font-weight:700;">${exitWarn}</div>` : ""}
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
+            <span style="font-size:10px; color:var(--muted);">Abierta ${tr.openedAt} · $${Number(tr.notional).toLocaleString("en-US")}</span>
+            <button class="ticker-chip" onclick="event.stopPropagation(); closePosition('${tr.id}')">Cerrar Trade</button>
+          </div>
+        </div>`;
+      }).join("");
+
+      saveOpenTrades();
+      document.getElementById("activeTradesGrid").innerHTML = cards;
+      const pnlPill = document.getElementById("activeTradesPnlPill");
+      pnlPill.textContent = `P&L Abierto: ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`;
+      pnlPill.className = "pill " + (totalPnl >= 0 ? "pill-green" : "pill-red");
+    }
+
+    function renderNasdaqHalts(state) {
+      const nh = state.nasdaq_halts;
+      const pill = document.getElementById("nasdaqHaltPill");
+      const banner = document.getElementById("nasdaqHaltBanner");
+      if (!nh) return;
+      const activeList = (nh.watchlist_halts || []).filter(h => h.is_active);
+      if (activeList.length > 0) {
+        pill.textContent = `🚨 HALT NASDAQ: ${activeList.map(h => h.symbol).join(", ")}`;
+        pill.className = "pill pill-red";
+        banner.style.display = "block";
+        banner.innerHTML = activeList.map(h =>
+          `🚨 HALT OFICIAL NASDAQ en ${h.symbol} (${h.reason_code}: ${h.reason_label}) desde ${h.halt_time_et} ET · Reapertura: ${h.resumption_time_et}`
+        ).join("<br/>");
+        const key = activeList.map(h => `${h.symbol}_${h.halt_time_et}`).join("|");
+        if (lastHaltKey !== key) {
+          lastHaltKey = key;
+          notifyUser(`Alerta oficial de Nasdaq: suspensión de cotización en ${activeList[0].symbol}.`, true);
+        }
+      } else {
+        pill.textContent = `Nasdaq Halts: OK (${(nh.recent_market_halts || []).length} mercado)`;
+        pill.className = "pill pill-green";
+        banner.style.display = "none";
+      }
+    }
+
+    async function saveFinnhub() {
+      const key = document.getElementById("finnhubKeyInput").value.trim();
+      if (window.__INITIAL_STATE__) {
+        document.getElementById("finnhubStatus").textContent = "Finnhub WebSocket <300ms funciona en el servidor local (puerto 8000).";
+        return;
+      }
+      const resp = await fetch("/api/feeds/finnhub", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: key }),
+      });
+      const data = await resp.json();
+      document.getElementById("finnhubStatus").textContent = data.status || "Actualizado";
     }
 
     function tickClocks() {
@@ -877,8 +1112,10 @@
       }
       lastSignalSpoken = sigKey;
 
-      // Bloque Flash: Cazador de Velas Rápidas
+      // Bloque Flash: Cazador de Velas Rápidas & Trampas de Mecha
       renderFlashSection(state);
+      renderNasdaqHalts(state);
+      renderActiveTrades(state);
 
       // Bloque 2: Top Opportunities & Pair Trade
       const counts = inter.opportunity_counts || { longs: 0, shorts: 0, waits: 0 };
@@ -920,7 +1157,10 @@
                 <span class="neg">Stop: ${fmtPx(op.stop_loss)}</span> ·
                 <span class="pos">Obj: ${fmtPx(op.take_profit_1)}</span>
               </div>
-              <div style="font-size:11px; color:#cbd5e1;">${op.reason}</div>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                <span style="font-size:11px; color:#cbd5e1; flex:1;">${op.reason}</span>
+                <button class="ticker-chip" onclick="event.stopPropagation(); enterPosition('${op.symbol}', '${op.action}', ${op.entry_price}, ${op.stop_loss}, ${op.take_profit_1}, ${op.position_size_usd})">+ Entré</button>
+              </div>
             </div>
           `).join("")
         : `<div style="grid-column:span 4; color:var(--muted); padding:10px;">Sin señales fuertes activas ahora mismo en los 28 activos. Todas las mesas en modo espera.</div>`;
@@ -1130,6 +1370,7 @@
         flashSensitivity = savedSens;
         document.getElementById("flashSensSelect").value = String(savedSens);
       }
+      loadOpenTrades();
     } catch (_) {}
 
     if (window.__INITIAL_STATE__) {
