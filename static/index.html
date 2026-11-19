@@ -311,6 +311,27 @@
     .sig-GREEN { background: rgba(16, 185, 129, 0.18); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.4); }
     .sig-RED { background: rgba(239, 68, 68, 0.18); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.4); }
     .sig-AMBER { background: rgba(245, 158, 11, 0.14); color: var(--amber); border: 1px solid rgba(245, 158, 11, 0.35); }
+    .sig-MUTED { background: rgba(148, 163, 184, 0.12); color: var(--muted); border: 1px solid rgba(148, 163, 184, 0.25); }
+
+    details.drawer-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 16px;
+    }
+    details.drawer-card > summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--blue);
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    details.drawer-card[open] > summary { margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
 
     .feed-list { max-height: 230px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
     .feed-item {
@@ -338,6 +359,7 @@
     </div>
 
     <div class="top-right">
+      <span id="usSessionPill" class="pill pill-amber">Bolsa EE.UU.: Comprobando...</span>
       <span id="liveFeedsPill" class="pill pill-blue">Conectando feeds...</span>
       <span id="nasdaqHaltPill" class="pill pill-green">Nasdaq Halts: OK</span>
       <div class="capital-box">
@@ -459,84 +481,74 @@
       <div class="grid-4" id="topOpsGrid"></div>
     </section>
 
-    <!-- BLOQUE 3: GRAFICO INTERACTIVO DE CUALQUIER STOCK VS VWAP -->
-    <section class="card">
-      <div class="section-title">
-        <span id="chartTitle">3. Gráfico en Vivo vs Línea Institucional (VWAP)</span>
-        <span style="font-size:12px;">
-          <span style="color:var(--green);">━━ Precio Real</span> &nbsp;·&nbsp;
-          <span style="color:var(--blue);">━━ Nivel Institucional (VWAP)</span>
-          <span style="color:var(--muted);"> (Haz clic en cualquier acción para ver su gráfico y niveles)</span>
-        </span>
-      </div>
-
-      <div class="ticker-bar" id="tickerBar"></div>
-
-      <div class="selected-strip" id="selectedAssetStrip">
-        <span>Selecciona un ticker arriba o en cualquier tabla para inspeccionar su señal, Stop-Loss y Objetivo.</span>
-      </div>
-
-      <div class="chart-box">
-        <canvas id="liveChart"></canvas>
-      </div>
-    </section>
-
-    <!-- BLOQUE 4: LOS 6 SEMAFOROS AUTOMATICOS -->
-    <section class="card">
-      <div class="section-title">
-        <span>4. Los 6 Semáforos Automáticos de tu Estrategia</span>
-        <span style="font-size:11px;">🟢 Favorable · 🟡 Esperando · 🔴 Precaución / Peligro</span>
-      </div>
-      <div class="grid-3" id="rulesGrid"></div>
-    </section>
-
-    <!-- BLOQUE 5: TABLAS COMPLETAS DE LOS 6 SECTORES CON SENAL, STOP Y OBJETIVO POR ACCION -->
-    <section class="card">
-      <div class="section-title">
-        <span>5. Todos los Stocks Big Tech, Semiconductores, SaaS, Energía Nuclear y Cripto (Señal en Vivo por Activo)</span>
-        <span id="sectorSignalsSummary" class="mono" style="font-size:12px; color:var(--blue);">--</span>
-      </div>
-      <div class="grid-2" id="sectorsGrid"></div>
-    </section>
-
-    <!-- BLOQUE 6: NOTICIAS, SEC EDGAR Y AVISOS -->
-    <section class="grid-2">
-      <div class="card">
-        <div class="section-title">
-          <span>6. Noticias en Vivo & Documentos SEC EDGAR</span>
-          <span id="secAutoBadge" class="pill pill-blue">Auto-escaneo cada 60s</span>
+    <!-- CAJON DESPLEGABLE 1: GRAFICO INTERACTIVO DE CUALQUIER STOCK VS VWAP -->
+    <details id="chartDrawer" class="drawer-card" ontoggle="if(this.open && latestState) setTimeout(() => renderChartSection(latestState), 50)">
+      <summary>
+        <span id="chartTitle">📊 Ver Gráfico en Vivo (Precio Real vs Línea Institucional VWAP)</span>
+        <span style="font-size:11px; color:var(--muted);">Haz clic para desplegar / ocultar</span>
+      </summary>
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div class="ticker-bar" id="tickerBar"></div>
+        <div class="selected-strip" id="selectedAssetStrip">
+          <span>Selecciona un ticker arriba o en cualquier tabla para inspeccionar su señal, Stop-Loss y Objetivo.</span>
         </div>
-        <div class="feed-list" id="newsSecList"></div>
-      </div>
-
-      <div class="card">
-        <div class="section-title">
-          <span>7. Historial de Avisos Automáticos</span>
+        <div class="chart-box">
+          <canvas id="liveChart"></canvas>
         </div>
-        <div class="feed-list" id="alertsFeed"></div>
-
-        <details style="margin-top:6px;">
-          <summary>Opcional: Telegram Móvil y Feed Sub-Segundo Finnhub WebSocket (&lt;300ms)</summary>
-          <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <input id="tgToken" type="password" placeholder="Telegram Bot Token" style="flex:1; min-width:140px;" />
-              <input id="tgChatId" type="text" placeholder="Telegram Chat ID" style="flex:1; min-width:120px;" />
-            </div>
-            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-              <label style="font-size:12px;"><input id="tgEnabled" type="checkbox" /> Activar Telegram</label>
-              <button onclick="saveTelegram()">Guardar Telegram</button>
-              <button onclick="testAlert()">Probar Aviso</button>
-              <span id="tgStatus" style="font-size:12px; color:var(--muted);"></span>
-            </div>
-            <div style="border-top:1px dashed var(--border); padding-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-              <input id="finnhubKeyInput" type="password" placeholder="Finnhub API Key (gratis en finnhub.io para ticks <300ms)" style="flex:1; min-width:220px;" />
-              <button onclick="saveFinnhub()">Activar Finnhub WS</button>
-              <span id="finnhubStatus" style="font-size:11px; color:var(--muted);"></span>
-            </div>
-          </div>
-        </details>
       </div>
-    </section>
+    </details>
+
+    <!-- CAJON DESPLEGABLE 2: TODOS LOS STOCKS (6 SECTORES) Y 6 SEMAFOROS -->
+    <details id="dataDrawer" class="drawer-card">
+      <summary>
+        <span>📋 Ver Data Completa: Los 28 Stocks (6 Sectores) y los 6 Semáforos de Estrategia</span>
+        <span id="sectorSignalsSummary" class="mono" style="font-size:11px; color:var(--muted);">Haz clic para desplegar</span>
+      </summary>
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <div class="grid-3" id="rulesGrid"></div>
+        <div class="grid-2" id="sectorsGrid"></div>
+      </div>
+    </details>
+
+    <!-- CAJON DESPLEGABLE 3: NOTICIAS, SEC EDGAR, HISTORIAL Y CONFIGURACION -->
+    <details id="newsDrawer" class="drawer-card">
+      <summary>
+        <span>📰 Ver Noticias en Vivo, SEC EDGAR, Historial de Alertas y Configuración (Telegram / Finnhub)</span>
+        <span id="secAutoBadge" class="pill pill-blue">Auto-escaneo cada 60s</span>
+      </summary>
+      <section class="grid-2">
+        <div class="card">
+          <div class="section-title"><span>Noticias en Vivo & Documentos SEC EDGAR</span></div>
+          <div class="feed-list" id="newsSecList"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-title"><span>Historial de Avisos Automáticos</span></div>
+          <div class="feed-list" id="alertsFeed"></div>
+
+          <details style="margin-top:6px;">
+            <summary>Opcional: Telegram Móvil y Feed Sub-Segundo Finnhub WebSocket (&lt;300ms)</summary>
+            <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px;">
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <input id="tgToken" type="password" placeholder="Telegram Bot Token" style="flex:1; min-width:140px;" />
+                <input id="tgChatId" type="text" placeholder="Telegram Chat ID" style="flex:1; min-width:120px;" />
+              </div>
+              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <label style="font-size:12px;"><input id="tgEnabled" type="checkbox" /> Activar Telegram</label>
+                <button onclick="saveTelegram()">Guardar Telegram</button>
+                <button onclick="testAlert()">Probar Aviso</button>
+                <span id="tgStatus" style="font-size:12px; color:var(--muted);"></span>
+              </div>
+              <div style="border-top:1px dashed var(--border); padding-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                <input id="finnhubKeyInput" type="password" placeholder="Finnhub API Key (gratis en finnhub.io para ticks <300ms)" style="flex:1; min-width:220px;" />
+                <button onclick="saveFinnhub()">Activar Finnhub WS</button>
+                <span id="finnhubStatus" style="font-size:11px; color:var(--muted);"></span>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+    </details>
   </main>
 
   <script>
@@ -654,7 +666,13 @@
               </div>
             </div>`;
           }).join("")
-        : `<div style="grid-column:span 3; color:var(--muted); padding:10px;">Sin velas explosivas activas todavía. El radar vigila cada 5s en vivo.</div>`;
+        : (() => {
+            const usClosed = state.us_market_session && state.us_market_session.session === "CLOSED";
+            const msg = usClosed
+              ? "✅ Bolsa de EE.UU. CERRADA ahora mismo (Pre-Market 10:00 CET · Wall Street 15:30 CET). Solo Cripto 24/7 está en vigilancia y no hay velas explosivas activas en este segundo."
+              : `✅ Mercado tranquilo: ninguna acción ni cripto abierta cumple el criterio real de vela rápida (≥ ${flashSensitivity}x y cuerpo lleno) en este momento.`;
+            return `<div style="grid-column:span 3; color:var(--muted); padding:10px; background:var(--sub); border-radius:8px; border:1px solid var(--border);">${msg}</div>`;
+          })();
 
       // Exhaustion Wick Traps sub-panel
       const traps = fc.wick_traps || [];
@@ -904,7 +922,11 @@
     function selectChartTicker(sym) {
       selectedChartTicker = sym;
       try { localStorage.setItem("ant_selected_ticker", sym); } catch (_) {}
-      if (latestState) renderChartSection(latestState);
+      const drawer = document.getElementById("chartDrawer");
+      if (drawer && !drawer.open) {
+        drawer.open = true;
+      }
+      if (latestState) setTimeout(() => renderChartSection(latestState), 40);
     }
 
     function findAssetBySymbol(state, sym) {
@@ -1076,8 +1098,14 @@
 
       // Top bar
       document.getElementById("phaseLabel").textContent = state.phase.label;
+      const usSes = state.us_market_session;
+      if (usSes) {
+        const sp = document.getElementById("usSessionPill");
+        sp.textContent = usSes.label;
+        sp.className = "pill " + (usSes.is_open ? "pill-green" : (usSes.is_extended ? "pill-blue" : "pill-red"));
+      }
       const feedsPill = document.getElementById("liveFeedsPill");
-      feedsPill.textContent = `Feeds en Vivo: Cripto ${fs.binance} · Bolsa ${fs.yahoo}`;
+      feedsPill.textContent = `Cripto 24/7: ${fs.binance} · Bolsa: ${fs.yahoo}`;
       feedsPill.className = "pill pill-green";
 
       const antBadge = document.getElementById("antLiveBadge");
@@ -1093,6 +1121,7 @@
       const hero = document.getElementById("orderHero");
       hero.className = `order-hero ${d.signal_color}`;
       document.getElementById("signalText").textContent = d.signal;
+      document.getElementById("heroEnterBtn").style.display = d.signal.includes("CERRADA") ? "none" : "inline-block";
       document.getElementById("targetTicker").textContent = d.target_ticker;
       document.getElementById("targetType").textContent = d.is_proxy
         ? "Proxy líquido en Quantfury (ANT aún no abre)"
@@ -1118,11 +1147,12 @@
       renderActiveTrades(state);
 
       // Bloque 2: Top Opportunities & Pair Trade
-      const counts = inter.opportunity_counts || { longs: 0, shorts: 0, waits: 0 };
+      const counts = inter.opportunity_counts || { longs: 0, shorts: 0, waits: 0, closed: 0 };
       document.getElementById("opCountsPills").innerHTML = `
         <span class="pill pill-green">🟢 ${counts.longs} Comprar</span>
         <span class="pill pill-red">🔴 ${counts.shorts} Vender en Corto</span>
         <span class="pill pill-amber">🟡 ${counts.waits} Esperar</span>
+        ${counts.closed ? `<span class="pill">🔒 ${counts.closed} Bolsa Cerrada</span>` : ""}
       `;
 
       const pt = inter.pair_trade;

@@ -48,6 +48,47 @@ HALT_REASON_LABELS: dict[str, str] = {
     "T12": "Información adicional solicitada por Nasdaq",
 }
 
+
+def _us_market_session_status() -> dict[str, Any]:
+    """Return truthful US Equity market session state in NY ET and Madrid CET."""
+    now_et = datetime.now(NY_TZ)
+    weekday = now_et.weekday()  # 0=Mon .. 6=Sun
+    hm = now_et.hour * 60 + now_et.minute
+    if weekday >= 5:
+        return {
+            "is_open": False,
+            "is_extended": False,
+            "session": "CLOSED",
+            "label": "Bolsa EE.UU. CERRADA (Fin de semana)",
+        }
+    if 9 * 60 + 30 <= hm < 16 * 60:
+        return {
+            "is_open": True,
+            "is_extended": False,
+            "session": "REGULAR",
+            "label": "Bolsa EE.UU. ABIERTA (Sesión Regular)",
+        }
+    if 4 * 60 <= hm < 9 * 60 + 30:
+        return {
+            "is_open": False,
+            "is_extended": True,
+            "session": "PRE_MARKET",
+            "label": "Pre-Market EE.UU. (Apertura oficial 15:30 CET)",
+        }
+    if 16 * 60 <= hm < 20 * 60:
+        return {
+            "is_open": False,
+            "is_extended": True,
+            "session": "POST_MARKET",
+            "label": "Post-Market EE.UU. (Horario extendido)",
+        }
+    return {
+        "is_open": False,
+        "is_extended": False,
+        "session": "CLOSED",
+        "label": "Bolsa EE.UU. CERRADA (Pre-Market 10:00 CET · Apertura 15:30 CET)",
+    }
+
 FALLBACK_QUOTES: dict[str, dict[str, Any]] = {
     "QQQ": {"price": 512.40, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
     "GOOGL": {"price": 182.50, "change_pct": 0.0, "source": "FALLBACK", "intraday_series": []},
@@ -408,6 +449,14 @@ def _compute_intraday_metrics(result_obj: dict[str, Any]) -> dict[str, Any]:
         2,
     )
 
+    last_bar_ts = active_bars[-1]["ts"] if active_bars else None
+    last_bar_time_cet = (
+        datetime.fromtimestamp(last_bar_ts, tz=MADRID_TZ).strftime("%d/%m %H:%M CET")
+        if last_bar_ts
+        else "--"
+    )
+    data_age_sec = max(0, int(time.time() - last_bar_ts)) if last_bar_ts else 999999
+
     return {
         "price": round(last_px, 2),
         "prev_close": round(float(prev_close), 2) if prev_close else None,
@@ -415,6 +464,9 @@ def _compute_intraday_metrics(result_obj: dict[str, Any]) -> dict[str, Any]:
         "change_pct": round(pct, 2),
         "opening_print": round(float(opening_print), 2) if opening_print else None,
         "opening_print_ts": open_ts,
+        "last_bar_ts": last_bar_ts,
+        "last_bar_time_cet": last_bar_time_cet,
+        "data_age_sec": data_age_sec,
         "vwap": round(float(vwap_final), 2) if vwap_final else None,
         "vwap_std": vwap_std,
         "hod": round(float(hod), 2) if hod else None,
@@ -1281,7 +1333,44 @@ class TelemetryEngine:
         score = 35
         reason = profile["impact"]
         is_ant = symbol == "ANT"
+        is_crypto = symbol.endswith("-USD")
         slip_frac = (slip_pct / 100.0) if is_ant else 0.008
+
+        us_session = _us_market_session_status()
+        data_age_sec = int(quote.get("data_age_sec") if quote.get("data_age_sec") is not None else 0)
+        is_simulated = quote.get("source") == "SIMULATED"
+
+        if is_crypto:
+            is_live_tradable = True
+        elif is_ant:
+            is_live_tradable = bool(self.ant_state.get("ant_live_trading"))
+        elif is_simulated:
+            is_live_tradable = True
+        else:
+            is_live_tradable = (
+                (us_session["is_open"] or us_session["is_extended"])
+                and (data_age_sec <= 1200 or quote.get("source") == "FINNHUB_WS")
+            )
+
+        if not is_live_tradable and not is_ant:
+            last_bar_lbl = quote.get("last_bar_time_cet") or "cierre anterior"
+            return {
+                **quote,
+                "name": profile["name"],
+                "sector_name": profile["sector"],
+                "impact_thesis": profile["impact"],
+                "is_live_tradable": False,
+                "action": "MERCADO CERRADO",
+                "action_color": "MUTED",
+                "confidence_score": 0,
+                "entry_price": round(price, 2),
+                "stop_loss": None,
+                "take_profit_1": None,
+                "take_profit_2": None,
+                "position_size_usd": round(equity * safe_lev, 2),
+                "position_shares": round((equity * safe_lev) / price, 2) if price > 0 else 0.0,
+                "reason": f"Bolsa EE.UU. cerrada (último dato: {last_bar_lbl}). No operar hasta apertura (15:30 CET).",
+            }
 
         if is_ant:
             ant_live = bool(self.ant_state.get("ant_live_trading"))
@@ -1392,6 +1481,7 @@ class TelemetryEngine:
             "name": profile["name"],
             "sector_name": profile["sector"],
             "impact_thesis": profile["impact"],
+            "is_live_tradable": is_live_tradable,
             "action": action,
             "action_color": action_color,
             "confidence_score": score,
@@ -1401,7 +1491,11 @@ class TelemetryEngine:
             "take_profit_2": tp2,
             "position_size_usd": notional,
             "position_shares": shares,
-            "reason": reason,
+            "reason": (
+                f"[{us_session['session'].replace('_', '-')}] {reason}"
+                if (not is_crypto and not is_ant and us_session["is_extended"])
+                else reason
+            ),
         }
 
     def _compute_intermarket_matrix(self) -> dict[str, Any]:
@@ -1537,7 +1631,9 @@ class TelemetryEngine:
         long_count = sum(1 for a in all_evaluated if a["action"] == "COMPRAR (LONG)")
         short_count = sum(1 for a in all_evaluated if a["action"] == "VENDER EN CORTO (SHORT)")
         wait_count = sum(1 for a in all_evaluated if a["action"] == "ESPERAR")
+        closed_count = sum(1 for a in all_evaluated if a["action"] == "MERCADO CERRADO")
 
+        us_session = _us_market_session_status()
         # Pair trade: Best AI/Hyperscaler/Nuclear Long vs Weakest SaaS Short
         long_pool = (
             sectors_out["HYPERSCALERS"]["tickers"]
@@ -1557,8 +1653,11 @@ class TelemetryEngine:
             key=lambda x: (-100 if x["action"] == "VENDER EN CORTO (SHORT)" else 0) + float(x.get("change_pct") or 0) + float(x.get("vs_vwap_pct") or 0),
         )
         pair_spread = round(float(best_long.get("change_pct") or 0) - float(best_short.get("change_pct") or 0), 2)
-        pair_active = (best_long["action"] == "COMPRAR (LONG)" or float(best_long.get("change_pct") or 0) > 0) and (
-            best_short["action"] == "VENDER EN CORTO (SHORT)" or float(best_short.get("change_pct") or 0) < 0
+        equities_open = us_session["is_open"] or us_session["is_extended"]
+        pair_active = (
+            equities_open
+            and (best_long["action"] == "COMPRAR (LONG)" or float(best_long.get("change_pct") or 0) > 0)
+            and (best_short["action"] == "VENDER EN CORTO (SHORT)" or float(best_short.get("change_pct") or 0) < 0)
         )
 
         pair_trade = {
@@ -1575,9 +1674,13 @@ class TelemetryEngine:
             "short_stop": best_short["stop_loss"],
             "spread_pct": pair_spread,
             "summary": (
-                f"Par Activo: LONG {best_long['symbol']} ({best_long['change_pct']:+.2f}%) + SHORT {best_short['symbol']} ({best_short['change_pct']:+.2f}%)"
-                if pair_active
-                else f"Par en vigilancia: mejor candidato IA ({best_long['symbol']} {best_long['change_pct']:+.2f}%) vs SaaS más débil ({best_short['symbol']} {best_short['change_pct']:+.2f}%)."
+                "Bolsa EE.UU. CERRADA — el Trade de Pares se activará en vivo al abrir Wall Street (15:30 CET)."
+                if not equities_open
+                else (
+                    f"Par Activo: LONG {best_long['symbol']} ({best_long['change_pct']:+.2f}%) + SHORT {best_short['symbol']} ({best_short['change_pct']:+.2f}%)"
+                    if pair_active
+                    else f"Par en vigilancia: mejor candidato IA ({best_long['symbol']} {best_long['change_pct']:+.2f}%) vs SaaS más débil ({best_short['symbol']} {best_short['change_pct']:+.2f}%)."
+                )
             ),
         }
 
@@ -1594,6 +1697,7 @@ class TelemetryEngine:
                 "longs": long_count,
                 "shorts": short_count,
                 "waits": wait_count,
+                "closed": closed_count,
                 "total_assets": len(all_evaluated),
             },
             "pair_trade": pair_trade,
@@ -1626,12 +1730,11 @@ class TelemetryEngine:
     ) -> dict[str, Any]:
         """Detect explosive momentum candles mid-move for rapid LONG/SHORT scalping in Quantfury."""
         candidates: list[dict[str, Any]] = []
-        fallback_watch: list[dict[str, Any]] = []
         wick_traps: list[dict[str, Any]] = []
 
         for item in all_evaluated:
             sym = item["symbol"]
-            if sym == "ANT" and not self.ant_state.get("ant_live_trading"):
+            if not item.get("is_live_tradable"):
                 continue
             price = float(item.get("price") or 0.0)
             if price <= 0:
@@ -1741,21 +1844,20 @@ class TelemetryEngine:
                 ),
             }
 
+            has_real_move = abs(primary_move) >= 0.20 or abs(two_move) >= 0.30
+            has_real_body = clv_pct >= 62
             if is_triggered or (
-                effective_burst <= 4.5
-                and (effective_burst >= 1.15 or abs(vel_60s) >= 0.15 or abs(two_move) >= 0.30)
+                has_real_move
+                and has_real_body
+                and effective_burst <= 4.5
+                and (effective_burst >= 1.20 or abs(vel_60s) >= 0.20)
             ):
                 candidates.append(entry_obj)
-            else:
-                fallback_watch.append(entry_obj)
 
         candidates.sort(key=lambda x: (1 if x["is_triggered"] else 0, x["burst_multiple"]), reverse=True)
-        fallback_watch.sort(key=lambda x: (x["burst_multiple"], abs(x["two_bar_move_pct"])), reverse=True)
 
         active_alerts = [c for c in candidates if c["is_triggered"]]
         accelerating_watch = [c for c in candidates if not c["is_triggered"]]
-        if len(accelerating_watch) < 4:
-            accelerating_watch.extend(fallback_watch[: 4 - len(accelerating_watch)])
 
         wick_traps.sort(key=lambda x: x["wick_pct"], reverse=True)
         return {
@@ -1964,14 +2066,26 @@ class TelemetryEngine:
                 ]
                 when_to_close = "Esperar confirmación antes de operar."
         else:
-            # PRE-IPO / SUBASTA: evaluate live proxy opportunities automatically
+            # PRE-IPO / SUBASTA: check if US equity market is even open first!
+            us_session = _us_market_session_status()
             nvda_vs_vwap = float(nvda.get("vs_vwap_pct") or 0.0)
             crm_vs_vwap = float(crm.get("vs_vwap_pct") or 0.0)
-            qqq_vs_vwap = float(qqq.get("vs_vwap_pct") or 0.0)
             ai_avg = sector_avgs.get("SEMICONDUCTORES_IA", 0.0)
             saas_avg = sector_avgs.get("SAAS_TRADICIONAL", 0.0)
 
-            if sig["qqq_pct"] <= -1.2 and sig["nvda_pct"] <= -1.5 and nvda_vs_vwap < 0:
+            if us_session["session"] == "CLOSED":
+                signal = "ESPERAR — BOLSA EE.UU. CERRADA"
+                signal_color = "AMBER"
+                target_ticker = "ANT"
+                is_proxy = False
+                plain_headline = "La Bolsa de EE.UU. está CERRADA ahora mismo. No operes acciones hasta la apertura (Pre-Market 10:00 CET · Wall Street 15:30 CET)."
+                plain_reasons = [
+                    f"Anthropic (ANT) fijó precio oficial en ${ipo_price:.2f} (980M acciones). La subasta IPO Cross arranca hoy a las 15:30 CET.",
+                    f"El único mercado abierto 24/7 ahora es Cripto (Bitcoin en ${sig['btc_price']:,.0f}, {sig['btc_pct']:+.2f}%).",
+                    "Las alertas de acciones y velas rápidas solo se encenderán cuando el mercado esté realmente abierto y cotizando.",
+                ]
+                when_to_close = "Mercado de acciones cerrado. Sin operación abierta."
+            elif sig["qqq_pct"] <= -1.2 and sig["nvda_pct"] <= -1.5 and nvda_vs_vwap < 0:
                 signal = "VENDER EN CORTO (SHORT)"
                 signal_color = "RED"
                 target_ticker = "QQQ"
@@ -2247,6 +2361,7 @@ class TelemetryEngine:
         return {
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
             "phase": phase,
+            "us_market_session": _us_market_session_status(),
             "fetch_status": self._last_fetch_summary,
             "prospectus": self.prospectus,
             "sec_status": self.sec_status,
