@@ -207,6 +207,40 @@
       gap: 12px;
     }
 
+    /* Flash Candle Scalp Detector */
+    @keyframes pulseFlashGreen {
+      0%, 100% { box-shadow: 0 0 0 rgba(16, 185, 129, 0.0); border-color: var(--green); }
+      50% { box-shadow: 0 0 16px rgba(16, 185, 129, 0.45); border-color: #34d399; }
+    }
+    @keyframes pulseFlashRed {
+      0%, 100% { box-shadow: 0 0 0 rgba(239, 68, 68, 0.0); border-color: var(--red); }
+      50% { box-shadow: 0 0 16px rgba(239, 68, 68, 0.45); border-color: #f87171; }
+    }
+    .flash-card {
+      background: var(--sub);
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: transform 0.12s;
+    }
+    .flash-card:hover { transform: translateY(-1px); }
+    .flash-card.LONG {
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.16), var(--sub));
+      animation: pulseFlashGreen 1.6s infinite;
+    }
+    .flash-card.SHORT {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.16), var(--sub));
+      animation: pulseFlashRed 1.6s infinite;
+    }
+    .flash-card.WATCH {
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--amber);
+    }
+
     /* Traffic Lights */
     .light-card {
       background: var(--sub);
@@ -366,6 +400,25 @@
       </div>
     </section>
 
+    <!-- BLOQUE FLASH: CAZADOR DE VELAS RAPIDAS (MOMENTUM SCALP) -->
+    <section class="card">
+      <div class="section-title">
+        <span>⚡ Cazador de Velas Rápidas — Scalping de Impulso en Quantfury (1–5 min)</span>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <select id="flashSensSelect" onchange="changeFlashSensitivity(this.value)" style="background:var(--sub); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:11px;">
+            <option value="1.2">Sensibilidad Alta (≥ 1.2x vela normal)</option>
+            <option value="1.6" selected>Sensibilidad Media (≥ 1.6x vela normal)</option>
+            <option value="2.2">Sensibilidad Estricta (≥ 2.2x explosión)</option>
+          </select>
+          <span id="flashCountPill" class="pill pill-amber">Radar activo</span>
+        </div>
+      </div>
+      <div style="font-size:12px; color:var(--muted);">
+        Detecta velas que están acelerando a mitad de camino con cuerpo lleno (sin mecha de rechazo) para entrar en <strong style="color:var(--green);">LONG</strong> o <strong style="color:var(--red);">SHORT</strong> rápido en Quantfury, con Stop-Loss ceñido al 50% de la vela.
+      </div>
+      <div class="grid-3" id="flashGrid"></div>
+    </section>
+
     <!-- BLOQUE 2: SENALES ACTIVAS EN BIG TECH Y SECTORES IMPACTADOS -->
     <section class="card">
       <div class="section-title">
@@ -471,8 +524,108 @@
 
     let latestState = null;
     let selectedChartTicker = "AUTO";
+    let flashSensitivity = 1.6;
     let voiceEnabled = true;
     let lastSignalSpoken = "";
+    let lastFlashAlarmKey = "";
+
+    function changeFlashSensitivity(val) {
+      flashSensitivity = parseFloat(val) || 1.6;
+      try { localStorage.setItem("ant_flash_sens", String(flashSensitivity)); } catch (_) {}
+      if (latestState) renderFlashSection(latestState);
+    }
+
+    function playFlashCandleAlarm(item) {
+      if (!voiceEnabled || !item) return;
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const now = ctx.currentTime;
+        const freqs = item.direction === "LONG" ? [660, 990, 1180] : [880, 580, 440];
+        freqs.forEach((f, idx) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "triangle";
+          osc.frequency.value = f;
+          gain.gain.setValueAtTime(0.09, now + idx * 0.14);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.14 + 0.13);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(now + idx * 0.14);
+          osc.stop(now + idx * 0.14 + 0.14);
+        });
+      } catch (_) {}
+
+      if ("speechSynthesis" in window) {
+        try {
+          window.speechSynthesis.cancel();
+          const dirTxt = item.direction === "LONG" ? "Long" : "Short";
+          const msg = `¡Vela rápida detectada en ${item.symbol}! Impulso de ${item.burst_multiple} veces lo normal. Entrar ${dirTxt} con stop en ${item.scalp_stop_loss} y objetivo rápido en ${item.scalp_take_profit_1}.`;
+          const u = new SpeechSynthesisUtterance(msg);
+          u.lang = "es-ES";
+          window.speechSynthesis.speak(u);
+        } catch (_) {}
+      }
+    }
+
+    function renderFlashSection(state) {
+      const fc = state.flash_candles || (state.intermarket && state.intermarket.flash_candles);
+      if (!fc) return;
+      const allCand = fc.all_candidates || [];
+      const watch = fc.accelerating_watch || [];
+
+      const triggered = allCand.filter(c => {
+        return (c.burst_multiple >= flashSensitivity || c.is_triggered) && c.clv_pct >= 62;
+      });
+
+      const pill = document.getElementById("flashCountPill");
+      if (triggered.length > 0) {
+        pill.textContent = `⚡ ${triggered.length} VELA(S) EXPLOSIVA(S) ACTIVA(S)`;
+        pill.className = triggered[0].direction === "LONG" ? "pill pill-green" : "pill pill-red";
+        const top = triggered[0];
+        const key = `${top.symbol}_${top.direction}_${Math.floor(top.burst_multiple * 2)}`;
+        if (lastFlashAlarmKey !== key) {
+          lastFlashAlarmKey = key;
+          playFlashCandleAlarm(top);
+        }
+      } else {
+        pill.textContent = `Vigilando impulsos (≥ ${flashSensitivity}x)`;
+        pill.className = "pill pill-amber";
+      }
+
+      const itemsToShow = triggered.length > 0 ? triggered : watch.slice(0, 6);
+      const isWatchOnly = triggered.length === 0;
+
+      document.getElementById("flashGrid").innerHTML = itemsToShow.length
+        ? itemsToShow.map(item => {
+            const cardCls = isWatchOnly ? "WATCH" : item.direction;
+            const badgeCls = isWatchOnly ? "sig-AMBER" : (item.direction === "LONG" ? "sig-GREEN" : "sig-RED");
+            const actionLabel = isWatchOnly
+              ? `🔥 ACELERANDO (${item.direction})`
+              : (item.direction === "LONG" ? "⚡ ENTRAR LONG RÁPIDO" : "⚡ ENTRAR SHORT RÁPIDO");
+
+            return `<div class="flash-card ${cardCls}" onclick="selectChartTicker('${item.symbol}')">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                <strong class="mono" style="font-size:15px;">${item.symbol} <span style="font-weight:400; font-size:11px; color:var(--muted);">${item.name}</span></strong>
+                <span class="sig-tag ${badgeCls}">${actionLabel}</span>
+              </div>
+              <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--muted);">
+                <span>${item.sector_name} · ${item.scalp_duration_hint}</span>
+                <strong class="mono" style="color:var(--blue);">${item.burst_multiple}x velocidad · Cuerpo ${item.clv_pct}%</strong>
+              </div>
+              <div class="mono" style="font-size:12px;">
+                Entrada Ya: <strong>${fmtPx(item.entry_price)}</strong>
+                (<span class="${item.move_pct >= 0 ? 'pos' : 'neg'}">${item.move_pct >= 0 ? '+' : ''}${item.move_pct}%</span>)
+                · Inv: <strong>$${Number(item.position_size_usd).toLocaleString("en-US")}</strong>
+              </div>
+              <div class="mono" style="font-size:11px;">
+                <span class="neg">Stop Mitad Vela: ${fmtPx(item.scalp_stop_loss)}</span> ·
+                <span class="pos">TP1: ${fmtPx(item.scalp_take_profit_1)} / TP2: ${fmtPx(item.scalp_take_profit_2)}</span>
+              </div>
+              <div style="font-size:11px; color:#cbd5e1;">${item.reason}</div>
+            </div>`;
+          }).join("")
+        : `<div style="grid-column:span 3; color:var(--muted); padding:10px;">Sin velas explosivas activas todavía. El radar vigila cada 5s en vivo.</div>`;
+    }
 
     function tickClocks() {
       const now = new Date();
@@ -724,6 +877,9 @@
       }
       lastSignalSpoken = sigKey;
 
+      // Bloque Flash: Cazador de Velas Rápidas
+      renderFlashSection(state);
+
       // Bloque 2: Top Opportunities & Pair Trade
       const counts = inter.opportunity_counts || { longs: 0, shorts: 0, waits: 0 };
       document.getElementById("opCountsPills").innerHTML = `
@@ -969,6 +1125,11 @@
       if (savedTicker) selectedChartTicker = savedTicker;
       const savedCap = parseFloat(localStorage.getItem("ant_capital_usd"));
       if (savedCap >= 100) document.getElementById("capitalInput").value = savedCap;
+      const savedSens = parseFloat(localStorage.getItem("ant_flash_sens"));
+      if (savedSens >= 1.0) {
+        flashSensitivity = savedSens;
+        document.getElementById("flashSensSelect").value = String(savedSens);
+      }
     } catch (_) {}
 
     if (window.__INITIAL_STATE__) {

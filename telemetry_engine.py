@@ -70,7 +70,7 @@ ASSET_IMPACT_PROFILES: dict[str, dict[str, str]] = {
         "name": "Anthropic",
         "sector": "1. Subyacente OPI",
         "bias": "ANT_CORE",
-        "impact": "OPI principal ($80 ref). Choque entre FOMO y 316M acciones desbloqueadas el Día 1.",
+        "impact": "OPI fijada en $83.00 (ampliada a 980M acciones, $81.3B recaudados). Choque FOMO vs 316M desbloqueadas Día 1.",
     },
     "QQQ": {
         "name": "Nasdaq 100 ETF",
@@ -355,6 +355,40 @@ def _compute_intraday_metrics(result_obj: dict[str, Any]) -> dict[str, Any]:
         else 0.0
     )
 
+    # Explosive candle (Momentum Burst) metrics
+    prev_ranges = [
+        ((b["high"] - b["low"]) / b["low"]) * 100.0
+        for b in active_bars[:-1][-12:]
+        if b["low"] > 0
+    ]
+    avg_bar_range_pct = round(sum(prev_ranges) / len(prev_ranges), 3) if prev_ranges else 0.15
+
+    if active_bars:
+        lb = active_bars[-1]
+        last_bar_move_pct = round(((lb["close"] - lb["open"]) / lb["open"]) * 100.0, 3) if lb["open"] > 0 else 0.0
+        last_bar_range_pct = round(((lb["high"] - lb["low"]) / lb["low"]) * 100.0, 3) if lb["low"] > 0 else 0.0
+        if len(active_bars) >= 2 and active_bars[-2]["open"] > 0:
+            two_bar_move_pct = round(((lb["close"] - active_bars[-2]["open"]) / active_bars[-2]["open"]) * 100.0, 3)
+        else:
+            two_bar_move_pct = last_bar_move_pct
+        span = lb["high"] - lb["low"]
+        if span > 0:
+            clv = (lb["close"] - lb["low"]) / span
+        else:
+            clv = 0.85 if lb["close"] > lb["open"] else (0.15 if lb["close"] < lb["open"] else 0.5)
+        candle_midpoint = round((lb["open"] + lb["close"]) / 2.0, 2)
+    else:
+        last_bar_move_pct = 0.0
+        last_bar_range_pct = 0.0
+        two_bar_move_pct = 0.0
+        clv = 0.5
+        candle_midpoint = round(last_px, 2)
+
+    burst_multiple = round(
+        max(abs(last_bar_move_pct), abs(two_bar_move_pct) * 0.75) / max(0.08, avg_bar_range_pct),
+        2,
+    )
+
     return {
         "price": round(last_px, 2),
         "prev_close": round(float(prev_close), 2) if prev_close else None,
@@ -371,6 +405,13 @@ def _compute_intraday_metrics(result_obj: dict[str, Any]) -> dict[str, Any]:
         "avg_1m_volume": round(sum(pos_vols) / len(pos_vols), 0) if pos_vols else 0.0,
         "vs_vwap_pct": vs_vwap_pct,
         "verdict": verdict,
+        "avg_bar_range_pct": avg_bar_range_pct,
+        "last_bar_move_pct": last_bar_move_pct,
+        "two_bar_move_pct": two_bar_move_pct,
+        "last_bar_range_pct": last_bar_range_pct,
+        "burst_multiple": burst_multiple,
+        "clv": round(clv, 3),
+        "candle_midpoint": candle_midpoint,
         "intraday_series": series[-30:],
         "market_state": meta.get("marketState", "UNKNOWN"),
     }
@@ -386,8 +427,8 @@ class TelemetryEngine:
         }
         self.sim_overrides: dict[str, float] = {}
 
-        # Prospectus / Structural state (auto-updated when 424B4 or pricing headline publishes)
-        self.prospectus: dict[str, Any] = parse_424b4_text(manual_price=80.0, greenshoe_exercised=True)
+        # Prospectus / Structural state (updated to official Nov 18, 2026 final pricing: $83.00)
+        self.prospectus: dict[str, Any] = parse_424b4_text(manual_price=83.0, greenshoe_exercised=True)
         self.sec_status: dict[str, Any] = {
             "checked_at": None,
             "source_status": "PENDING",
@@ -436,6 +477,7 @@ class TelemetryEngine:
             "luld_halt_gap_pct": 7.5,
         }
 
+        self._price_history: dict[str, list[tuple[float, float]]] = {}
         self._running = False
         self._task: asyncio.Task[Any] | None = None
         self._last_fetch_summary: dict[str, Any] = {
@@ -444,6 +486,26 @@ class TelemetryEngine:
             "ant_feed": "PENDING",
             "news": "PENDING",
         }
+
+    def _record_tick_velocity(self, symbol: str, price: float) -> tuple[float, float]:
+        """Track sliding 60-second tick window and compute 30s and 60s velocity percentages."""
+        if price <= 0:
+            return 0.0, 0.0
+        now = time.time()
+        hist = self._price_history.setdefault(symbol, [])
+        hist.append((now, price))
+        cutoff = now - 90.0
+        hist[:] = [(t, p) for t, p in hist if t >= cutoff][-18:]
+
+        if len(hist) < 2:
+            return 0.0, 0.0
+
+        oldest_price = hist[0][1]
+        vel_60s = ((price - oldest_price) / oldest_price) * 100.0 if oldest_price > 0 else 0.0
+
+        ref_30 = next((p for t, p in hist if (now - t) <= 35.0), oldest_price)
+        vel_30s = ((price - ref_30) / ref_30) * 100.0 if ref_30 > 0 else 0.0
+        return round(vel_30s, 3), round(vel_60s, 3)
 
     async def start(self) -> None:
         """Start background 5-second telemetry loop + 60-second SEC/news scanner."""
@@ -552,9 +614,13 @@ class TelemetryEngine:
                     price = float(item.get("lastPrice", 0.0))
                     pct = float(item.get("priceChangePercent", 0.0))
                     vol_usd = float(item.get("quoteVolume", 0.0))
+                    vel_30s, vel_60s = self._record_tick_velocity(key, price)
                     verdict = (
                         "ALCISTA" if pct >= 0.5 else ("BAJISTA" if pct <= -0.5 else "NEUTRAL")
                     )
+                    dec = 4 if price < 2 else 2
+                    crypto_burst = round(abs(vel_60s) / 0.18, 2)
+                    crypto_clv = 0.85 if vel_60s > 0.04 else (0.15 if vel_60s < -0.04 else 0.5)
                     self.quotes[key] = {
                         "symbol": key,
                         "price": price,
@@ -563,6 +629,15 @@ class TelemetryEngine:
                         "vwap": None,
                         "vs_vwap_pct": None,
                         "verdict": verdict,
+                        "tick_velocity_30s_pct": vel_30s,
+                        "tick_velocity_60s_pct": vel_60s,
+                        "avg_bar_range_pct": 0.18,
+                        "last_bar_move_pct": vel_60s,
+                        "two_bar_move_pct": vel_60s,
+                        "last_bar_range_pct": abs(vel_60s),
+                        "burst_multiple": crypto_burst,
+                        "clv": crypto_clv,
+                        "candle_midpoint": round(price / (1.0 + vel_60s / 200.0), dec),
                         "intraday_series": [],
                         "source": "LIVE_BINANCE",
                         "updated_at": now_iso,
@@ -593,9 +668,12 @@ class TelemetryEngine:
                 if metrics["price"] <= 0:
                     return False
 
+                vel_30s, vel_60s = self._record_tick_velocity(symbol, metrics["price"])
                 self.quotes[symbol] = {
                     "symbol": symbol,
                     **metrics,
+                    "tick_velocity_30s_pct": vel_30s,
+                    "tick_velocity_60s_pct": vel_60s,
                     "source": "LIVE_YAHOO",
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
@@ -661,6 +739,7 @@ class TelemetryEngine:
             if self.ant_state["quantfury_status"] == "NOT_LISTED_YET":
                 self.ant_state["quantfury_status"] = "LONG_ONLY"
 
+            vel_30s, vel_60s = self._record_tick_velocity("ANT", new_px)
             op = metrics["opening_print"] or (series[0]["p"] if series else new_px)
             op_ts = metrics["opening_print_ts"] or time.time()
             op_cet = datetime.fromtimestamp(op_ts, tz=MADRID_TZ).strftime("%H:%M:%S")
@@ -678,6 +757,15 @@ class TelemetryEngine:
                     "last_volume": metrics["last_volume"],
                     "avg_1m_volume": metrics["avg_1m_volume"],
                     "vol_ratio": metrics["vol_ratio"],
+                    "tick_velocity_30s_pct": vel_30s,
+                    "tick_velocity_60s_pct": vel_60s,
+                    "avg_bar_range_pct": metrics["avg_bar_range_pct"],
+                    "last_bar_move_pct": metrics["last_bar_move_pct"],
+                    "two_bar_move_pct": metrics["two_bar_move_pct"],
+                    "last_bar_range_pct": metrics["last_bar_range_pct"],
+                    "burst_multiple": metrics["burst_multiple"],
+                    "clv": metrics["clv"],
+                    "candle_midpoint": metrics["candle_midpoint"],
                     "ticks": series,
                     "luld_halt_active": step_move_pct >= 5.0,
                     "luld_reason": (
@@ -1207,6 +1295,16 @@ class TelemetryEngine:
                         "vwap": ant_vwap,
                         "hod": self.ant_state.get("hod"),
                         "lod": self.ant_state.get("lod"),
+                        "vol_ratio": self.ant_state.get("vol_ratio"),
+                        "tick_velocity_30s_pct": self.ant_state.get("tick_velocity_30s_pct", 0.0),
+                        "tick_velocity_60s_pct": self.ant_state.get("tick_velocity_60s_pct", 0.0),
+                        "avg_bar_range_pct": self.ant_state.get("avg_bar_range_pct", 0.15),
+                        "last_bar_move_pct": self.ant_state.get("last_bar_move_pct", 0.0),
+                        "two_bar_move_pct": self.ant_state.get("two_bar_move_pct", 0.0),
+                        "last_bar_range_pct": self.ant_state.get("last_bar_range_pct", 0.0),
+                        "burst_multiple": self.ant_state.get("burst_multiple", 0.0),
+                        "clv": self.ant_state.get("clv", 0.5),
+                        "candle_midpoint": self.ant_state.get("candle_midpoint", ant_px or ipo_price),
                         "vs_vwap_pct": vs_v,
                         "verdict": verdict,
                         "intraday_series": [
@@ -1326,12 +1424,15 @@ class TelemetryEngine:
             ),
         }
 
+        flash_candles = self._detect_flash_candles(all_evaluated, equity, safe_lev)
+
         mtm_multiplier = (ant_px / ipo_price) if (ant_px and ipo_price > 0) else 1.0
         return {
             "benchmark_qqq": qqq_eval,
             "sectors": sectors_out,
             "sector_avgs": sector_avgs,
             "top_opportunities": active_ops[:10],
+            "flash_candles": flash_candles,
             "opportunity_counts": {
                 "longs": long_count,
                 "shorts": short_count,
@@ -1358,6 +1459,120 @@ class TelemetryEngine:
                 "amazon_live_implied_usd": round(AMAZON_MTM_2026_USD * mtm_multiplier, 0),
                 "estimated_cloud_return_usd": ESTIMATED_NET_PROCEEDS_USD,
             },
+        }
+
+    def _detect_flash_candles(
+        self,
+        all_evaluated: list[dict[str, Any]],
+        equity: float,
+        safe_lev: float,
+    ) -> dict[str, Any]:
+        """Detect explosive momentum candles mid-move for rapid LONG/SHORT scalping in Quantfury."""
+        candidates: list[dict[str, Any]] = []
+        fallback_watch: list[dict[str, Any]] = []
+
+        for item in all_evaluated:
+            sym = item["symbol"]
+            if sym == "ANT" and not self.ant_state.get("ant_live_trading"):
+                continue
+            price = float(item.get("price") or 0.0)
+            if price <= 0:
+                continue
+
+            burst = float(item.get("burst_multiple") or 0.0)
+            last_move = float(item.get("last_bar_move_pct") or 0.0)
+            two_move = float(item.get("two_bar_move_pct") or 0.0)
+            vel_60s = float(item.get("tick_velocity_60s_pct") or 0.0)
+            clv = float(item.get("clv") if item.get("clv") is not None else 0.5)
+            midpoint = float(item.get("candle_midpoint") or price)
+            vol_ratio = float(item.get("vol_ratio") or 1.0)
+
+            effective_burst = round(max(burst, abs(vel_60s) / 0.18), 2)
+            primary_move = vel_60s if abs(vel_60s) >= abs(last_move) else last_move
+            direction = "LONG" if (primary_move >= 0 and clv >= 0.5) or two_move > 0.1 else "SHORT"
+            if clv >= 0.62:
+                direction = "LONG"
+            elif clv <= 0.38:
+                direction = "SHORT"
+
+            dec = 4 if price < 2 else 2
+            impulse_abs = max(price * 0.004, abs(price - midpoint) * 2.0)
+            notional = round(equity * safe_lev, 2)
+            shares = round(notional / price, 4 if price < 20 else 2)
+
+            if direction == "LONG":
+                scalp_stop = round(min(midpoint, price * 0.9955), dec)
+                scalp_tp1 = round(price + impulse_abs * 1.0, dec)
+                scalp_tp2 = round(price + impulse_abs * 1.6, dec)
+                clv_pct = round(clv * 100)
+                bull_trigger = (
+                    (effective_burst >= 1.6 or vel_60s >= 0.35 or last_move >= 0.40 or two_move >= 0.65)
+                    and clv >= 0.68
+                    and effective_burst <= 4.5
+                )
+                is_triggered = bull_trigger
+                flash_action = "⚡ ENTRAR LONG RÁPIDO" if is_triggered else "🔥 ACELERANDO (PRE-VELA)"
+            else:
+                scalp_stop = round(max(midpoint, price * 1.0045), dec)
+                scalp_tp1 = round(max(0.01, price - impulse_abs * 1.0), dec)
+                scalp_tp2 = round(max(0.01, price - impulse_abs * 1.6), dec)
+                clv_pct = round((1.0 - clv) * 100)
+                bear_trigger = (
+                    (effective_burst >= 1.6 or vel_60s <= -0.35 or last_move <= -0.40 or two_move <= -0.65)
+                    and clv <= 0.32
+                    and effective_burst <= 4.5
+                )
+                is_triggered = bear_trigger
+                flash_action = "⚡ ENTRAR SHORT RÁPIDO" if is_triggered else "🔥 ACELERANDO (PRE-VELA)"
+
+            entry_obj = {
+                "symbol": sym,
+                "name": item.get("name", sym),
+                "sector_name": item.get("sector_name", ""),
+                "flash_action": flash_action,
+                "direction": direction,
+                "is_triggered": is_triggered,
+                "burst_multiple": effective_burst,
+                "move_pct": round(primary_move, 2),
+                "two_bar_move_pct": round(two_move, 2),
+                "tick_velocity_60s_pct": round(vel_60s, 2),
+                "clv_pct": clv_pct,
+                "vol_ratio": round(vol_ratio, 2),
+                "entry_price": round(price, dec),
+                "scalp_stop_loss": scalp_stop,
+                "scalp_take_profit_1": scalp_tp1,
+                "scalp_take_profit_2": scalp_tp2,
+                "scalp_duration_hint": "1 a 5 min (Operación Corta)",
+                "position_size_usd": notional,
+                "position_shares": shares,
+                "reason": (
+                    f"Vela {effective_burst:.1f}x más rápida que lo normal ({primary_move:+.2f}%, cuerpo lleno {clv_pct}%) "
+                    f"sin mecha de rechazo. Stop ceñido a mitad de vela (${scalp_stop})."
+                ),
+            }
+
+            if is_triggered or (
+                effective_burst <= 4.5
+                and (effective_burst >= 1.15 or abs(vel_60s) >= 0.15 or abs(two_move) >= 0.30)
+            ):
+                candidates.append(entry_obj)
+            else:
+                fallback_watch.append(entry_obj)
+
+        candidates.sort(key=lambda x: (1 if x["is_triggered"] else 0, x["burst_multiple"]), reverse=True)
+        fallback_watch.sort(key=lambda x: (x["burst_multiple"], abs(x["two_bar_move_pct"])), reverse=True)
+
+        active_alerts = [c for c in candidates if c["is_triggered"]]
+        accelerating_watch = [c for c in candidates if not c["is_triggered"]]
+        if len(accelerating_watch) < 4:
+            accelerating_watch.extend(fallback_watch[: 4 - len(accelerating_watch)])
+
+        return {
+            "active_alerts": active_alerts[:8],
+            "accelerating_watch": accelerating_watch[:6],
+            "all_candidates": candidates[:12],
+            "active_count": len(active_alerts),
+            "top_flash": active_alerts[0] if active_alerts else (accelerating_watch[0] if accelerating_watch else None),
         }
 
     def _classify_scenario(self, matrix: dict[str, Any]) -> dict[str, Any]:
@@ -1780,6 +1995,20 @@ class TelemetryEngine:
                 cooldown_seconds=180.0,
             )
 
+        for fc in matrix["flash_candles"]["active_alerts"]:
+            if fc["burst_multiple"] >= 1.8:
+                await self.alerts.emit(
+                    severity="FLASH_CANDLE",
+                    category=fc["symbol"],
+                    title=f"{fc['flash_action']} en {fc['symbol']} ({fc['burst_multiple']}x velocidad)",
+                    message=(
+                        f"Entrada: ${fc['entry_price']} | Stop mitad de vela: ${fc['scalp_stop_loss']} | "
+                        f"Obj 1: ${fc['scalp_take_profit_1']} | Cuerpo: {fc['clv_pct']}%"
+                    ),
+                    dedup_key=f"flash_{fc['symbol']}_{fc['direction']}",
+                    cooldown_seconds=120.0,
+                )
+
     def get_full_state(self) -> dict[str, Any]:
         phase = self._detect_current_phase()
         matrix = self._compute_intermarket_matrix()
@@ -1822,6 +2051,7 @@ class TelemetryEngine:
                 "seconds_since_opening_print": sec_since_open,
             },
             "intermarket": matrix,
+            "flash_candles": matrix["flash_candles"],
             "scenario": scenario,
             "decision": decision,
             "quantfury_plan": quantfury_plan,

@@ -10,13 +10,13 @@ DB_PATH = BASE_DIR / "copilot_state.db"
 # SEC EDGAR settings
 SEC_USER_AGENT = "AntigravityQuantCopilot/1.0 (ops@ant-copilot.local)"
 
-# Structural IPO Share Counts & Economics (S-1/A)
-BASE_SHARES = 825_000_000
-NEW_SHARES = 801_350_000
-COFOUNDER_SHARES = 23_650_000
-GREENSHOE_SHARES = 123_750_000
-UNLOCKED_INSIDER_SHARES = 316_000_000  # ~38.3% of base offer unlocked on Day 1
-RETAIL_FLIPPING_SHARES = 165_000_000   # ~20% retail allocation (Fidelity, Robinhood, Schwab)
+# Structural IPO Share Counts & Economics (Final 424B4 Pricing — Nov 18, 2026)
+BASE_SHARES = 980_000_000          # Upsized from 825M to 980M Class A shares
+NEW_SHARES = 956_350_000           # Newly issued by Anthropic
+COFOUNDER_SHARES = 23_650_000      # Selling stockholders / co-founders
+GREENSHOE_SHARES = 147_000_000     # 15% over-allotment option on 980M upsized offer
+UNLOCKED_INSIDER_SHARES = 316_000_000  # Employee/insider shares unlocked on Day 1
+RETAIL_FLIPPING_SHARES = 196_000_000   # ~20% retail allocation (Fidelity, Robinhood, Schwab)
 
 PRIVATE_PLACEMENT_USD = 26_000_000_000
 PRIVATE_PLACEMENT_INVESTORS = {
@@ -26,8 +26,8 @@ PRIVATE_PLACEMENT_INVESTORS = {
 }
 
 S1_PRICE_RANGE = (70.0, 78.0)
-WSJ_TARGET_PRICE = 80.0
-FULLY_DILUTED_SHARES_APPROX = 18_500_000_000
+WSJ_TARGET_PRICE = 83.0            # Official final IPO price fixed Nov 18, 2026 ($83.00)
+FULLY_DILUTED_SHARES_APPROX = 18_200_000_000  # ~$1.51T FDV at $83.00
 
 # Fundamentals & Commitments
 RUN_RATE_END_2025 = 9_000_000_000
