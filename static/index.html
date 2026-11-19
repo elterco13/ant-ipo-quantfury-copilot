@@ -374,12 +374,46 @@
     <!-- BANNER OFICIAL NASDAQ TRADE HALTS -->
     <div id="nasdaqHaltBanner" style="display:none; background:rgba(239,68,68,0.18); border:2px solid var(--red); border-radius:10px; padding:12px 16px; font-weight:700; color:#fecaca;"></div>
 
-    <!-- GESTOR DE OPERACIONES ACTIVAS EN QUANTFURY (TRAILING STOP POR VOZ) -->
-    <section id="activeTradesSection" class="card" style="display:none; border-color:var(--blue);">
+    <!-- GESTOR DE OPERACIONES ACTIVAS EN QUANTFURY (SEGUIMIENTO INTELIGENTE EN VIVO) -->
+    <section id="activeTradesSection" class="card" style="border-color:var(--blue);">
       <div class="section-title">
-        <span>🎯 Mis Operaciones Activas en Quantfury (Breakeven + Trailing Stop Automático por Voz)</span>
-        <span id="activeTradesPnlPill" class="pill pill-blue">P&L Total: $0.00</span>
+        <span>🎯 Mis Operaciones Activas en Quantfury (Seguimiento en Vivo: Mantener · Agregar · Cobrar · Salir)</span>
+        <span id="activeTradesPnlPill" class="pill pill-blue">0 abiertas · P&L: $0.00</span>
       </div>
+
+      <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; background:var(--sub); border:1px solid var(--border); border-radius:8px; padding:8px 10px;">
+        <span style="font-size:11px; font-weight:700; color:var(--blue);">¿En qué entraste?</span>
+        <select id="quickTradeTicker" onchange="prefillQuickTradePrice()" style="min-width:115px;">
+          <option value="BTC-USD">BTC-USD</option>
+          <option value="ETH-USD">ETH-USD</option>
+          <option value="NEAR-USD">NEAR-USD</option>
+          <option value="XRP-USD">XRP-USD</option>
+          <option value="SOL-USD">SOL-USD</option>
+          <option value="BNB-USD">BNB-USD</option>
+          <option value="DOGE-USD">DOGE-USD</option>
+          <option value="TAO-USD">TAO-USD</option>
+          <option value="RENDER-USD">RENDER-USD</option>
+          <option value="FET-USD">FET-USD</option>
+          <option value="ANT">ANT</option>
+          <option value="NVDA">NVDA</option>
+          <option value="GOOGL">GOOGL</option>
+          <option value="AMZN">AMZN</option>
+          <option value="MSFT">MSFT</option>
+          <option value="AVGO">AVGO</option>
+          <option value="AMD">AMD</option>
+          <option value="CRM">CRM</option>
+          <option value="ADBE">ADBE</option>
+          <option value="QQQ">QQQ</option>
+        </select>
+        <select id="quickTradeDir">
+          <option value="LONG">LONG (Compra)</option>
+          <option value="SHORT">SHORT (Corto)</option>
+        </select>
+        <input id="quickTradeEntry" type="number" step="any" placeholder="Precio (auto vivo)" style="width:125px;" />
+        <input id="quickTradeUsd" type="number" step="10" value="100" placeholder="Monto $" style="width:95px;" title="Monto nocional en Quantfury ($)" />
+        <button class="active-chip" onclick="enterFromQuickBar()">+ Registrar y Seguir</button>
+      </div>
+
       <div class="grid-3" id="activeTradesGrid"></div>
     </section>
 
@@ -710,12 +744,67 @@
       try { localStorage.setItem("ant_open_trades_v1", JSON.stringify(openTrades)); } catch (_) {}
     }
 
+    function prefillQuickTradePrice() {
+      const sym = document.getElementById("quickTradeTicker").value;
+      const asset = findAssetBySymbol(latestState, sym);
+      if (asset && asset.price) {
+        document.getElementById("quickTradeEntry").value = asset.price;
+      }
+    }
+
+    function enterFromQuickBar() {
+      const sym = document.getElementById("quickTradeTicker").value;
+      const dir = document.getElementById("quickTradeDir").value;
+      const usd = parseFloat(document.getElementById("quickTradeUsd").value) || 100;
+      const asset = findAssetBySymbol(latestState, sym);
+      const livePx = asset && asset.price ? Number(asset.price) : 0;
+      const entry = parseFloat(document.getElementById("quickTradeEntry").value) || livePx;
+      if (!entry || entry <= 0) return;
+
+      const dec = entry < 2 ? 4 : 2;
+      const defaultSl = dir === "LONG"
+        ? (asset && asset.stop_loss && asset.stop_loss < entry ? asset.stop_loss : Number((entry * 0.98).toFixed(dec)))
+        : (asset && asset.stop_loss && asset.stop_loss > entry ? asset.stop_loss : Number((entry * 1.02).toFixed(dec)));
+      const defaultTp1 = dir === "LONG"
+        ? (asset && asset.take_profit_1 && asset.take_profit_1 > entry ? asset.take_profit_1 : Number((entry * 1.03).toFixed(dec)))
+        : (asset && asset.take_profit_1 && asset.take_profit_1 < entry ? asset.take_profit_1 : Number((entry * 0.97).toFixed(dec)));
+
+      enterPosition(sym, dir, entry, defaultSl, defaultTp1, usd);
+      document.getElementById("quickTradeEntry").value = "";
+    }
+
+    function addCapitalToPosition(id) {
+      const tr = openTrades.find(t => t.id === id);
+      if (!tr) return;
+      const asset = findAssetBySymbol(latestState, tr.symbol);
+      const livePx = asset && asset.price ? Number(asset.price) : tr.entry;
+      const extraStr = prompt(`¿Cuánto dinero adicional ($) agregaste en ${tr.symbol} a precio actual ${fmtPx(livePx)}?`, String(Math.round(tr.notional * 0.5)));
+      const extraUsd = parseFloat(extraStr);
+      if (!extraUsd || extraUsd <= 0) return;
+      const totalUsd = tr.notional + extraUsd;
+      const newAvgEntry = ((tr.entry * tr.notional) + (livePx * extraUsd)) / totalUsd;
+      const dec = livePx < 2 ? 4 : 2;
+      tr.entry = Number(newAvgEntry.toFixed(dec));
+      tr.notional = Number(totalUsd.toFixed(2));
+      tr.pyramidCount = (tr.pyramidCount || 0) + 1;
+      tr.addNotified = true;
+      // Protect breakeven when pyramiding
+      tr.trailingStop = tr.direction === "LONG"
+        ? Math.max(tr.trailingStop, tr.entry)
+        : Math.min(tr.trailingStop, tr.entry);
+      saveOpenTrades();
+      notifyUser(`Capital añadido en ${tr.symbol}. Nuevo precio medio ${tr.entry} y stop protegido en breakeven.`, false);
+      if (latestState) renderActiveTrades(latestState);
+    }
+
     function enterPosition(symbol, direction, entryPrice, stopLoss, tp1, notionalUsd) {
-      const cap = parseFloat(document.getElementById("capitalInput").value) || 10000;
-      const notional = notionalUsd || cap * 2.0;
+      const quickUsd = parseFloat(document.getElementById("quickTradeUsd")?.value) || 100;
+      const notional = notionalUsd || quickUsd;
       const dir = direction.includes("SHORT") ? "SHORT" : "LONG";
       const entry = Number(entryPrice);
-      const sl = Number(stopLoss);
+      const dec = entry < 2 ? 4 : 2;
+      const sl = Number(stopLoss) || Number((dir === "LONG" ? entry * 0.98 : entry * 1.02).toFixed(dec));
+      const target1 = Number(tp1) || Number((dir === "LONG" ? entry * 1.03 : entry * 0.97).toFixed(dec));
       const risk = Math.max(entry * 0.005, Math.abs(entry - sl));
       openTrades.unshift({
         id: `${symbol}_${Date.now()}`,
@@ -724,16 +813,15 @@
         entry,
         initialStop: sl,
         trailingStop: sl,
-        tp1: Number(tp1),
+        tp1: target1,
         risk,
         notional,
-        breakevenNotified: false,
-        tp1Notified: false,
-        exitNotified: false,
+        pyramidCount: 0,
+        lastVerdictCode: "",
         openedAt: new Date().toLocaleTimeString("es-ES"),
       });
       saveOpenTrades();
-      notifyUser(`Operación registrada: ${dir} en ${symbol} a ${entry} dólares.`, false);
+      notifyUser(`Seguimiento activado: ${dir} en ${symbol} a ${entry} dólares.`, false);
       if (latestState) renderActiveTrades(latestState);
     }
 
@@ -741,7 +829,8 @@
       if (!latestState || !latestState.decision) return;
       const d = latestState.decision;
       const dir = d.signal.includes("SHORT") ? "SHORT" : "LONG";
-      enterPosition(d.target_ticker, dir, d.entry_price, d.stop_loss_price, d.take_profit_1, d.position_size_usd);
+      const quickUsd = parseFloat(document.getElementById("quickTradeUsd")?.value) || d.position_size_usd;
+      enterPosition(d.target_ticker, dir, d.entry_price, d.stop_loss_price, d.take_profit_1, quickUsd);
     }
 
     function closePosition(id) {
@@ -751,51 +840,55 @@
     }
 
     function renderActiveTrades(state) {
-      const sec = document.getElementById("activeTradesSection");
+      const grid = document.getElementById("activeTradesGrid");
+      const pnlPill = document.getElementById("activeTradesPnlPill");
       if (!openTrades.length) {
-        sec.style.display = "none";
+        grid.innerHTML = `<div style="grid-column:span 3; color:var(--muted); font-size:12px;">Aún no has registrado operaciones abiertas. Elige tu activo arriba (ej. BTC-USD, ETH-USD, NEAR-USD, XRP-USD) y pulsa <strong>+ Registrar y Seguir</strong> para recibir avisos en vivo de cuándo <strong>Mantener</strong>, <strong>Agregar más dinero</strong>, <strong>Cobrar</strong> o <strong>Salir</strong>.</div>`;
+        pnlPill.textContent = "0 abiertas · P&L: $0.00";
+        pnlPill.className = "pill pill-blue";
         return;
       }
-      sec.style.display = "flex";
+
       const traps = (state.flash_candles && state.flash_candles.wick_traps) || [];
       let totalPnl = 0;
 
       const cards = openTrades.map(tr => {
         const asset = findAssetBySymbol(state, tr.symbol);
         const livePx = asset && asset.price ? Number(asset.price) : tr.entry;
+        const vwap = asset && asset.vwap ? Number(asset.vwap) : null;
+        const vsVwap = asset && asset.vs_vwap_pct !== undefined && asset.vs_vwap_pct !== null ? Number(asset.vs_vwap_pct) : 0;
+        const rsi = asset && asset.rsi_14 ? Number(asset.rsi_14) : 50;
+        const twoMove = asset && asset.two_bar_move_pct ? Number(asset.two_bar_move_pct) : 0;
+
         const delta = tr.direction === "LONG" ? (livePx - tr.entry) : (tr.entry - livePx);
         const pnlPct = tr.entry > 0 ? (delta / tr.entry) * 100 : 0;
         const pnlUsd = (tr.notional * pnlPct) / 100;
         totalPnl += pnlUsd;
         const rMult = tr.risk > 0 ? (delta / tr.risk) : 0;
+        const dec = livePx < 2 ? 4 : 2;
 
-        // Auto-Breakeven at +0.8R and Profit Trail at +1.3R
-        let statusTag = "EN CURSO";
-        let statusCls = "sig-AMBER";
+        // Auto-Trailing Stop updates
         if (rMult >= 1.3) {
           const lockedStop = tr.direction === "LONG"
             ? Math.max(tr.trailingStop, tr.entry + delta * 0.5)
             : Math.min(tr.trailingStop, tr.entry - delta * 0.5);
-          tr.trailingStop = Number(lockedStop.toFixed(livePx < 2 ? 4 : 2));
-          statusTag = "TRAILING ACTIVO (+1.3R)";
-          statusCls = "sig-GREEN";
-          if (!tr.tp1Notified) {
-            tr.tp1Notified = true;
-            notifyUser(`¡Objetivo alcanzado en ${tr.symbol}! Asegura ganancias o sube tu stop a ${tr.trailingStop}.`, true);
-          }
+          tr.trailingStop = Number(lockedStop.toFixed(dec));
         } else if (rMult >= 0.8) {
           tr.trailingStop = tr.direction === "LONG"
             ? Math.max(tr.trailingStop, tr.entry)
             : Math.min(tr.trailingStop, tr.entry);
-          statusTag = "BREAKEVEN PROTEGIDO";
-          statusCls = "sig-GREEN";
-          if (!tr.breakevenNotified) {
-            tr.breakevenNotified = true;
-            notifyUser(`${tr.symbol} alcanzó cero punto ocho R. Sube tu stop a breakeven en ${tr.entry} dólares.`, true);
-          }
         }
 
         const hitStop = tr.direction === "LONG" ? livePx <= tr.trailingStop : livePx >= tr.trailingStop;
+        const hitTp1 = tr.direction === "LONG" ? livePx >= tr.tp1 : livePx <= tr.tp1;
+        const lostVwap = vwap !== null && (
+          (tr.direction === "LONG" && vsVwap <= -0.25 && twoMove < -0.05) ||
+          (tr.direction === "SHORT" && vsVwap >= 0.25 && twoMove > 0.05)
+        );
+        const alignedVwap = vwap === null || (tr.direction === "LONG" ? vsVwap >= 0.10 : vsVwap <= -0.10);
+        const overextended = (tr.direction === "LONG" && rsi >= 74) || (tr.direction === "SHORT" && rsi <= 26);
+        const roomToPyramid = (tr.direction === "LONG" && rsi >= 45 && rsi <= 67 && twoMove >= 0) ||
+                              (tr.direction === "SHORT" && rsi >= 33 && rsi <= 55 && twoMove <= 0);
         const trapAgainst = traps.find(w =>
           w.symbol === tr.symbol && (
             (tr.direction === "LONG" && w.trap_type === "UPPER_WICK_TRAP") ||
@@ -803,42 +896,86 @@
           )
         );
 
-        let exitWarn = "";
-        if (hitStop || trapAgainst) {
-          statusTag = hitStop ? "🚨 STOP ALCANZADO — CERRAR" : "⚠️ MECHA DE GIRO — PROTEGER";
-          statusCls = "sig-RED";
-          exitWarn = hitStop
-            ? `Precio (${fmtPx(livePx)}) tocó tu stop (${fmtPx(tr.trailingStop)}). ¡Cerrar ahora en Quantfury!`
-            : trapAgainst.reason;
-          if (!tr.exitNotified) {
-            tr.exitNotified = true;
-            notifyUser(`¡Atención! Cerrar ahora ${tr.symbol}. ${hitStop ? "Stop alcanzado." : "Mecha de rechazo detectada."}`, true);
-          }
+        // Smart Real-Time Decision Engine for this position
+        let verdictCode = "HOLD";
+        let verdictLabel = "🟢 MANTENER (TENDENCIA SANA)";
+        let verdictCls = "sig-GREEN";
+        let advice = `Sobre control institucional (${vwap ? `VWAP ${fmtPx(vwap)}, ` : ""}RSI ${rsi}). Dejar correr hacia ${fmtPx(tr.tp1)}.`;
+        let voiceMsg = "";
+
+        if (hitStop || trapAgainst || lostVwap) {
+          verdictCode = "EXIT";
+          verdictLabel = "🚨 SALIR AHORA (CERRAR)";
+          verdictCls = "sig-RED";
+          advice = hitStop
+            ? `El precio (${fmtPx(livePx)}) tocó tu stop (${fmtPx(tr.trailingStop)}). Cerrar ya en Quantfury.`
+            : (trapAgainst ? `Mecha de rechazo detectada: ${trapAgainst.reason} Protege capital cerrando.` : `Perdió el VWAP (${fmtPx(vwap)}, ${vsVwap:+.2f}%) con momento en contra. Mejor salir y preservar capital.`);
+          voiceMsg = `¡Atención! Señal de salida en ${tr.symbol}. ${hitStop ? "Stop alcanzado." : (trapAgainst ? "Mecha de giro." : "Perdió el VWAP.")} Cierra posición.`;
+        } else if (hitTp1 || (overextended && pnlPct > 0.25)) {
+          verdictCode = "TAKE_PROFIT";
+          verdictLabel = "💰 COBRAR GANANCIAS / PARCIAL";
+          verdictCls = "sig-GREEN";
+          advice = hitTp1
+            ? `Objetivo 1 (${fmtPx(tr.tp1)}) alcanzado (+${pnlPct.toFixed(2)}%). Asegura 50%–100% de beneficios ahora.`
+            : `RSI en zona extrema (${rsi}) con ganancia (+${pnlPct.toFixed(2)}%). Buen momento para cobrar antes de retroceso.`;
+          voiceMsg = `¡Cobrar ganancias en ${tr.symbol}! ${hitTp1 ? "Objetivo alcanzado." : "Sobrecompra extrema en 5 minutos."}`;
+        } else if (pnlPct >= 0.40 && alignedVwap && roomToPyramid && (tr.pyramidCount || 0) < 2) {
+          verdictCode = "ADD_MORE";
+          verdictLabel = "🚀 AGREGAR MÁS DINERO (+25–50%)";
+          verdictCls = "sig-GREEN";
+          advice = `Ganando +${pnlPct.toFixed(2)}% alineado con VWAP (${vsVwap:+.2f}%) y RSI con recorrido (${rsi}). Puedes sumar +25% a +50% y subir tu stop a breakeven (${fmtPx(tr.entry)}).`;
+          voiceMsg = `Oportunidad para agregar capital en ${tr.symbol}. Tendencia confirmada sobre VWAP con recorrido.`;
+        } else if (rMult >= 0.8) {
+          verdictCode = "BREAKEVEN";
+          verdictLabel = "🛡️ SUBIR STOP A BREAKEVEN";
+          verdictCls = "sig-GREEN";
+          advice = `Alcanzó +${rMult.toFixed(2)}R. Sube tu stop en Quantfury a ${fmtPx(tr.trailingStop)} para operar sin riesgo.`;
+          voiceMsg = `${tr.symbol} listo para proteger. Sube tu stop a breakeven en ${tr.trailingStop}.`;
+        } else if (pnlPct < -0.25) {
+          verdictCode = "CAUTION";
+          verdictLabel = "🟡 VIGILAR STOP (NO AGREGAR)";
+          verdictCls = "sig-AMBER";
+          advice = `En retroceso (${pnlPct.toFixed(2)}%). Nunca agregues dinero en pérdida; respeta tu stop en ${fmtPx(tr.trailingStop)}.`;
         }
 
-        return `<div class="op-card ${pnlUsd >= 0 ? 'GREEN' : 'RED'}" onclick="selectChartTicker('${tr.symbol}')">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <strong class="mono">${tr.direction} ${tr.symbol}</strong>
-            <span class="sig-tag ${statusCls}">${statusTag}</span>
+        if (voiceMsg && tr.lastVerdictCode !== verdictCode) {
+          tr.lastVerdictCode = verdictCode;
+          notifyUser(voiceMsg, true);
+        } else if (!voiceMsg) {
+          tr.lastVerdictCode = verdictCode;
+        }
+
+        const cardColor = verdictCode === "EXIT" ? "RED" : (pnlUsd >= 0 ? "GREEN" : "AMBER");
+        return `<div class="op-card ${cardColor}" onclick="selectChartTicker('${tr.symbol}')">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+            <strong class="mono" style="font-size:14px;">${tr.direction} ${tr.symbol}</strong>
+            <span class="sig-tag ${verdictCls}">${verdictLabel}</span>
           </div>
-          <div class="mono" style="font-size:16px; font-weight:800;" class="${pnlUsd >= 0 ? 'pos' : 'neg'}">
+          <div class="mono" style="font-size:16px; font-weight:800;">
             <span class="${pnlUsd >= 0 ? 'pos' : 'neg'}">${pnlUsd >= 0 ? '+' : ''}$${pnlUsd.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}% · ${rMult >= 0 ? '+' : ''}${rMult.toFixed(2)}R)</span>
           </div>
           <div class="mono" style="font-size:11px; color:var(--muted);">
-            Entrada: ${fmtPx(tr.entry)} · Vivo: <strong>${fmtPx(livePx)}</strong> · Stop Actual: <strong class="neg">${fmtPx(tr.trailingStop)}</strong> · Obj: <strong class="pos">${fmtPx(tr.tp1)}</strong>
+            Entrada: ${fmtPx(tr.entry)} · Vivo: <strong>${fmtPx(livePx)}</strong> · VWAP: ${vwap ? fmtPx(vwap) : '--'} · RSI: <strong>${rsi}</strong>
           </div>
-          ${exitWarn ? `<div style="font-size:11px; color:#fecaca; font-weight:700;">${exitWarn}</div>` : ""}
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:2px;">
-            <span style="font-size:10px; color:var(--muted);">Abierta ${tr.openedAt} · $${Number(tr.notional).toLocaleString("en-US")}</span>
-            <button class="ticker-chip" onclick="event.stopPropagation(); closePosition('${tr.id}')">Cerrar Trade</button>
+          <div class="mono" style="font-size:11px;">
+            <span class="neg">Stop: ${fmtPx(tr.trailingStop)}</span> ·
+            <span class="pos">Obj: ${fmtPx(tr.tp1)}</span> ·
+            <span style="color:var(--muted);">Inv: $${Number(tr.notional).toLocaleString("en-US")}</span>
+          </div>
+          <div style="font-size:11px; color:#e2e8f0; background:rgba(7,11,18,0.55); padding:6px 8px; border-radius:6px;">${advice}</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-top:2px;">
+            <span style="font-size:10px; color:var(--muted);">Abierta ${tr.openedAt}</span>
+            <div style="display:flex; gap:6px;">
+              <button class="ticker-chip" onclick="event.stopPropagation(); addCapitalToPosition('${tr.id}')" title="Registrar dinero adicional y promediar entrada">+ Sumar $</button>
+              <button class="ticker-chip" onclick="event.stopPropagation(); closePosition('${tr.id}')">Cerrar</button>
+            </div>
           </div>
         </div>`;
       }).join("");
 
       saveOpenTrades();
-      document.getElementById("activeTradesGrid").innerHTML = cards;
-      const pnlPill = document.getElementById("activeTradesPnlPill");
-      pnlPill.textContent = `P&L Abierto: ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`;
+      grid.innerHTML = cards;
+      pnlPill.textContent = `${openTrades.length} abierta(s) · P&L: ${totalPnl >= 0 ? "+" : ""}$${totalPnl.toFixed(2)}`;
       pnlPill.className = "pill " + (totalPnl >= 0 ? "pill-green" : "pill-red");
     }
 
@@ -1247,7 +1384,10 @@
             </td>
             <td class="num mono">${vwapInfo}</td>
             <td class="num mono" style="font-size:11px;">${levelsInfo}</td>
-            <td style="font-size:11px; color:#cbd5e1; max-width:240px;">${t.reason || ""}</td>
+            <td style="font-size:11px; color:#cbd5e1; max-width:240px;">
+              <div>${t.reason || ""}</div>
+              ${t.is_live_tradable ? `<button class="ticker-chip" style="margin-top:4px;" onclick="event.stopPropagation(); enterPosition('${t.symbol}', '${t.action.includes('SHORT') ? 'SHORT' : 'LONG'}', ${t.entry_price}, ${t.stop_loss || 0}, ${t.take_profit_1 || 0})">+ Entré</button>` : ""}
+            </td>
           </tr>`;
         }).join("");
 
